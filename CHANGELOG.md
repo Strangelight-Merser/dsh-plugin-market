@@ -5,6 +5,20 @@ Versioning after its first public release.
 
 ## [Unreleased]
 
+### Added
+
+- Functional categories with compact filtering and per-category counts.
+- Automatic category inference for GitHub discoveries from names,
+  descriptions, and repository topics.
+- Automatic DSH Web restart and page recovery after a successful plugin
+  installation.
+
+### Changed
+
+- Removed verification labels from the market UI; catalog admission remains a
+  structural filter rather than a security or continuous runtime guarantee.
+- Made online catalog refresh status explicit in the market header.
+
 ## [0.5.0] - 2026-08-15
 
 ### Added

@@ -3,7 +3,7 @@
 ## Supported version
 
 Security fixes are provided for the latest release. The current development
-line is `0.4.x` and supports exactly DSH `0.1.0-rc.6`.
+line is `0.6.x` and supports exactly DSH `0.1.0-rc.6`.
 
 ## Reporting a vulnerability
 
