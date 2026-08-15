@@ -48,6 +48,12 @@ version or GitHub commit shown to the user.
 its generation timestamp. It is distributed as an offline fallback under this
 repository's MIT license to the extent permitted by the source licenses.
 
+The repository rebuilds this snapshot every six hours. Installed markets fetch
+the published snapshot from this repository with one request on startup, every
+six hours, or when the user presses refresh. They keep the bundled snapshot if
+the request fails or the published copy is older. Individual plugin manifests
+are not rechecked on the user's machine during a catalog refresh.
+
 Every third-party plugin remains governed by its own repository and package
 license. A missing or unfamiliar license is displayed as unknown; it is never
 rewritten into a positive open-source or verified claim.

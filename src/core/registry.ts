@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PLUGIN_CATEGORIES } from './category.ts'
 
 export const SUPPORTED_DSH_VERSION = '0.1.0-rc.6' as const
 
@@ -45,7 +46,7 @@ export const RegistryEntrySchema = z.object({
   id: z.string().min(1).max(200).regex(/^[a-z0-9][a-z0-9:._/-]*$/),
   name: z.string().min(1).max(120),
   description: z.object({ en: z.string().max(4000), zh: z.string().max(4000) }).strict(),
-  category: z.enum(['ui', 'theme', 'session', 'memory', 'tools', 'skill', 'workflow', 'notify', 'model', 'dev', 'fun', 'other']),
+  category: z.enum(PLUGIN_CATEGORIES),
   repositoryUrl: z.url().startsWith('https://github.com/'),
   license: z.string().min(1).nullable(),
   source: RegistrySourceSchema.nullable(),

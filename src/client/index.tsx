@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { PLUGIN_CATEGORIES, PLUGIN_CATEGORY_LABELS, type PluginCategory } from '../core/category.ts'
 import { sortCatalog, type CatalogSort } from './catalog-sort.ts'
 
 const API_PREFIX = '/api/dsh-market/v1'
@@ -13,7 +14,6 @@ interface ClientContext {
   slots: SlotsService
 }
 
-type CatalogStatus = 'installable' | 'verified' | 'blocked'
 type PluginState = 'active' | 'inactive' | 'unmanaged' | 'absent' | 'drifted'
 type Action = 'install' | 'enable' | 'disable' | 'uninstall'
 
@@ -21,10 +21,9 @@ interface CatalogEntry {
   id: string
   name: string
   description: { en: string; zh: string }
-  category: string
+  category: PluginCategory
   repositoryUrl: string
   license: string | null
-  status: CatalogStatus
   installBlockReason: string | null
   source: { packageName: string } | null
   installHint: { kind: 'npm'; packageName: string } | { kind: 'github'; repository: string; path: string | null } | null
@@ -68,7 +67,6 @@ interface LifecyclePreview {
   repositoryUrl: string
   resolvedRef: string
   license: string | null
-  verified: boolean
 }
 
 interface LifecycleResponse {
@@ -102,7 +100,9 @@ const styles = `
   .dpm-filters { display:flex; gap:8px; margin-bottom:12px; }
   .dpm-input, .dpm-select { background:color-mix(in srgb,currentColor 3%,transparent); border:1px solid color-mix(in srgb,currentColor 15%,transparent); border-radius:8px; color:inherit; font:inherit; font-size:12px; min-height:36px; outline:none; padding:7px 10px; }
   .dpm-input { flex:1 1 0; min-width:0; width:0; }
-  .dpm-select { flex:0 0 88px; max-width:88px; }
+  .dpm-select { flex:0 0 auto; }
+  .dpm-category-select { max-width:120px; width:120px; }
+  .dpm-sort-select { max-width:96px; width:96px; }
   .dpm-input:focus, .dpm-select:focus { border-color:var(--dpm-accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--dpm-accent) 16%,transparent); }
   .dpm-alert { align-items:flex-start; border-radius:8px; display:flex; font-size:11px; justify-content:space-between; line-height:1.45; margin:0 0 12px; padding:9px 10px; }
   .dpm-alert-error { background:color-mix(in srgb,#e35f68 11%,transparent); color:#eb858b; }
@@ -144,7 +144,7 @@ const styles = `
   .dpm-risk { background:color-mix(in srgb,var(--dpm-warn) 12%,transparent); border-radius:9px; color:rgba(255,255,255,.72); font-size:11px; line-height:1.5; margin-top:11px; padding:10px 11px; }
   .dpm-risk strong { color:#f0c56e; display:block; margin-bottom:2px; }
   .dpm-dialog-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:15px; }
-  @container (max-width:360px) { .dpm { padding:17px 16px 26px; } .dpm-card { align-items:start; grid-template-columns:1fr; } .dpm-actions { justify-content:flex-end; } }
+  @container (max-width:440px) { .dpm { padding:17px 16px 26px; } .dpm-filters { flex-wrap:wrap; } .dpm-input { flex-basis:100%; width:100%; } .dpm-category-select, .dpm-sort-select { flex:1 1 0; max-width:none; width:auto; } .dpm-card { align-items:start; grid-template-columns:1fr; } .dpm-actions { justify-content:flex-end; } }
 `
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -162,12 +162,6 @@ function formatTime(value: string | null): string {
 
 function stateLabel(state: PluginState): string {
   return { active: '已启用', inactive: '已停用', unmanaged: '已存在', absent: '未安装', drifted: '状态异常' }[state]
-}
-
-function trustLabel(status: CatalogStatus): string {
-  if (status === 'verified') return '已验证'
-  if (status === 'blocked') return '不可用'
-  return '清单已检查'
 }
 
 function actionLabel(action: Action): string {
@@ -189,6 +183,7 @@ function MarketSection(): React.ReactElement {
   const [previewing, setPreviewing] = React.useState<string | null>(null)
   const [registryBusy, setRegistryBusy] = React.useState(false)
   const [query, setQuery] = React.useState('')
+  const [categoryFilter, setCategoryFilter] = React.useState<'all' | PluginCategory>('all')
   const [sortOrder, setSortOrder] = React.useState<CatalogSort>('stars')
   const [view, setView] = React.useState<'recommended' | 'market' | 'installed'>('recommended')
   const [limit, setLimit] = React.useState(PAGE_SIZE)
@@ -217,7 +212,7 @@ function MarketSection(): React.ReactElement {
     return () => window.clearTimeout(timer)
   }, [catalogResponse?.refresh.refreshing, reloadAll])
 
-  React.useEffect(() => { setLimit(PAGE_SIZE) }, [query, sortOrder, view])
+  React.useEffect(() => { setLimit(PAGE_SIZE) }, [query, categoryFilter, sortOrder, view])
   React.useEffect(() => {
     if (confirmation === null) return undefined
     const close = (event: KeyboardEvent): void => { if (event.key === 'Escape' && busy === null) setConfirmation(null) }
@@ -291,9 +286,14 @@ function MarketSection(): React.ReactElement {
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const recommendationIds = new Set(catalogResponse?.evaluation.recommendationIds ?? [])
   const catalogForView = view === 'recommended' ? catalog.filter((entry) => recommendationIds.has(entry.id)) : catalog
-  const filteredCatalog = catalogForView.filter((entry) => normalizedQuery.length === 0 || [
-    entry.name, entry.category, entry.description.zh, entry.description.en,
-  ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
+  const categoryCounts = new Map<PluginCategory, number>()
+  for (const entry of catalogForView) categoryCounts.set(entry.category, (categoryCounts.get(entry.category) ?? 0) + 1)
+  const availableCategories = PLUGIN_CATEGORIES.filter((category) => (categoryCounts.get(category) ?? 0) > 0)
+  const filteredCatalog = catalogForView.filter((entry) => (
+    categoryFilter === 'all' || entry.category === categoryFilter
+  ) && (normalizedQuery.length === 0 || [
+    entry.name, PLUGIN_CATEGORY_LABELS[entry.category], entry.description.zh, entry.description.en,
+  ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery))))
   const visibleCatalog = sortCatalog(filteredCatalog, sortOrder).slice(0, limit)
 
   const renderActions = (entry: CatalogEntry, state: PluginState, managed: boolean): React.ReactNode => {
@@ -324,7 +324,7 @@ function MarketSection(): React.ReactElement {
     </div>
   }
 
-  const lastSync = catalogResponse?.refresh.source === 'live' ? '自动更新' : '内置目录'
+  const lastSync = catalogResponse?.refresh.source === 'live' ? '在线更新' : '内置目录'
   const refreshTitle = catalogResponse?.refresh.source === 'live'
     ? `更新插件目录，上次同步于 ${formatTime(catalogResponse.refresh.lastSuccessAt)}`
     : '更新插件目录'
@@ -334,7 +334,7 @@ function MarketSection(): React.ReactElement {
     <header className="dpm-header">
       <div>
         <h2 className="dpm-title">插件市场</h2>
-        <p className="dpm-summary">{catalogResponse === null ? '正在加载…' : `${catalog.length} 个已确认 DSH 插件 · ${lastSync}`}</p>
+        <p className="dpm-summary">{catalogResponse === null ? '正在加载…' : `${catalog.length} 个插件 · ${lastSync}`}</p>
       </div>
       <button aria-label="更新插件目录" className="dpm-button dpm-icon-button" disabled={registryBusy} onClick={() => { void refreshRegistry() }} title={refreshTitle} type="button">
         {registryBusy ? '…' : '↻'}
@@ -347,15 +347,19 @@ function MarketSection(): React.ReactElement {
       : <p className="dpm-alert dpm-alert-error" role="status"><span>在线目录不可用，已保留缓存</span></p>}
 
     <div className="dpm-tabs" role="tablist">
-      <button aria-selected={view === 'recommended'} className="dpm-tab" onClick={() => setView('recommended')} role="tab" type="button">推荐</button>
-      <button aria-selected={view === 'market'} className="dpm-tab" onClick={() => setView('market')} role="tab" type="button">发现</button>
+      <button aria-selected={view === 'recommended'} className="dpm-tab" onClick={() => { setView('recommended'); setCategoryFilter('all') }} role="tab" type="button">推荐</button>
+      <button aria-selected={view === 'market'} className="dpm-tab" onClick={() => { setView('market'); setCategoryFilter('all') }} role="tab" type="button">发现</button>
       <button aria-selected={view === 'installed'} className="dpm-tab" onClick={() => setView('installed')} role="tab" type="button">已安装 {managedInstalled.length > 0 ? `(${managedInstalled.length})` : ''}</button>
     </div>
 
     {view !== 'installed' ? <>
       <div className="dpm-filters">
-        <input aria-label="搜索插件" className="dpm-input" onChange={(event) => setQuery(event.target.value)} placeholder="搜索插件" type="search" value={query} />
-        <select aria-label="排序方式" className="dpm-select" onChange={(event) => setSortOrder(event.target.value as CatalogSort)} value={sortOrder}>
+        <input aria-label="搜索插件" className="dpm-input" onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或介绍" type="search" value={query} />
+        <select aria-label="功能分类" className="dpm-select dpm-category-select" onChange={(event) => setCategoryFilter(event.target.value as 'all' | PluginCategory)} value={categoryFilter}>
+          <option value="all">全部分类</option>
+          {availableCategories.map((category) => <option key={category} value={category}>{PLUGIN_CATEGORY_LABELS[category]} {categoryCounts.get(category)}</option>)}
+        </select>
+        <select aria-label="排序方式" className="dpm-select dpm-sort-select" onChange={(event) => setSortOrder(event.target.value as CatalogSort)} value={sortOrder}>
           <option value="stars">星标</option>
           <option value="recent">最近更新</option>
         </select>
@@ -369,7 +373,7 @@ function MarketSection(): React.ReactElement {
             <div className="dpm-card-main">
               <div className="dpm-card-head">
                 <h3 className="dpm-card-title">{entry.name}</h3>
-                <span className={`dpm-badge ${entry.status === 'verified' ? 'dpm-badge-good' : entry.status === 'blocked' ? 'dpm-badge-warn' : ''}`}>{trustLabel(entry.status)}</span>
+                <span className="dpm-badge">{PLUGIN_CATEGORY_LABELS[entry.category]}</span>
                 {entry.recommendation === null ? null : <span className="dpm-badge dpm-badge-good">推荐</span>}
                 {state === 'absent' ? null : <span className={`dpm-badge ${state === 'active' ? 'dpm-badge-good' : state === 'drifted' ? 'dpm-badge-warn' : ''}`}>{stateLabel(state)}</span>}
                 {pendingRestart.has(entry.id) ? <span className="dpm-badge dpm-badge-warn">待重启</span> : null}
@@ -405,6 +409,7 @@ function MarketSection(): React.ReactElement {
             <div className="dpm-card-main">
               <div className="dpm-card-head">
                 <h3 className="dpm-card-title">{entry.name}</h3>
+                <span className="dpm-badge">{PLUGIN_CATEGORY_LABELS[entry.category]}</span>
                 <span className={`dpm-badge ${plugin.state === 'active' ? 'dpm-badge-good' : plugin.state === 'drifted' ? 'dpm-badge-warn' : ''}`}>{stateLabel(plugin.state)}</span>
                 {plugin.id !== null && pendingRestart.has(plugin.id) ? <span className="dpm-badge dpm-badge-warn">待重启</span> : null}
               </div>
@@ -427,7 +432,6 @@ function MarketSection(): React.ReactElement {
           <div className="dpm-detail"><dt>包名</dt><dd>{confirmation.preview.packageName}</dd></div>
           <div className="dpm-detail"><dt>精确来源</dt><dd><code>{confirmation.preview.resolvedRef}</code></dd></div>
           <div className="dpm-detail"><dt>许可证</dt><dd>{confirmation.preview.license ?? '未声明'}</dd></div>
-          <div className="dpm-detail"><dt>信任</dt><dd>{confirmation.preview.verified ? '已验证' : '社区收录，未经安全审查'}</dd></div>
         </dl>
         <div className="dpm-risk"><strong>第三方代码</strong>插件会以你的用户权限运行，可能读取本机文件、凭证并访问网络。请仅安装你信任的来源。</div>
         <div className="dpm-dialog-actions">

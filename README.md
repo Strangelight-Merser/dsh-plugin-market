@@ -10,7 +10,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/Strangelight-Merser/dsh-plugin-market/ci.yml?branch=main&style=flat-square)](https://github.com/Strangelight-Merser/dsh-plugin-market/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/Strangelight-Merser/dsh-plugin-market?style=flat-square)](LICENSE)
 
-[安装](#安装) · [功能](#功能) · [可信目录](#可信目录) · [English](#english)
+[安装](#安装) · [功能](#功能) · [入库边界](#入库边界) · [English](#english)
 
 </div>
 
@@ -33,19 +33,14 @@ dsh web
 ## 功能
 
 - **推荐**：先看经过人工复核、写明用途和风险的项目。
-- **发现**：搜索完整目录，按 GitHub 星标或更新时间排序。
+- **分类发现**：按界面、主题、会话、记忆、工具等功能筛选，再按星标或更新时间排序。
 - **完整介绍**：长描述不截断，源码、许可证和评估集中展示。
 - **一键管理**：安装后默认启用，也可停用、重新启用或卸载。
 - **自动更新**：启动时、每六小时和手动触发时刷新目录。
 
-## 可信目录
+## 入库边界
 
-名字带 DSH 或打了 GitHub Topic，不代表它就是插件。每个入库位置都必须具有合法包名、`dsh.bundle.patch` 和宿主入口；安装前还会再次锁定精确 npm 版本或 GitHub 提交。
-
-| 标签 | 含义 |
-|---|---|
-| **清单已检查** | 已确认原生 DSH 插件结构，但不是安全审计 |
-| **已验证** | 已在指定 DSH 版本上完成构建、配置和启动验证 |
+名字带 DSH 或打了 GitHub Topic，不代表它就是插件。每个入库位置都必须具有合法包名、`dsh.bundle.patch` 和宿主入口；这只是结构筛选，不是持续在线运行验证或安全审计。
 
 > [!IMPORTANT]
 > 本项目是独立社区项目。第三方插件以你的用户权限运行，可能读取文件、凭证并访问网络，只安装你信任的来源。
@@ -67,6 +62,6 @@ dsh web
 
 ## English
 
-A minimal, lightweight plugin market built into DeepSeek Harness. Search 900+ manifest-checked plugins, read full descriptions, confirm an exact source, then install and enable from one screen. The current release targets `@deepseek-ai/dsh@0.1.0-rc.6` and the Web profile.
+A minimal, lightweight plugin market built into DeepSeek Harness. Browse 900+ plugins by function, read full descriptions, confirm the source, then install and enable from one screen. The catalog updates online on startup, every six hours, or on demand. The current release targets `@deepseek-ai/dsh@0.1.0-rc.6` and the Web profile.
 
 Run the single install command above, restart `dsh web`, then open **Settings → Plugin Market**.

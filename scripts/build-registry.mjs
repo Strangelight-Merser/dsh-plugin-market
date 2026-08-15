@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { resolvePluginCategory } from '../src/core/category.ts'
 
 const CURATED_URL = 'https://awesome-dsh-plugin.com/plugins.json'
 const GITHUB_SEARCH_URL = 'https://api.github.com/search/repositories'
@@ -7,7 +8,6 @@ const OUTPUT = resolve('data/registry-v1.json')
 const VERIFIED_OVERRIDES = resolve('data/verified-overrides.json')
 const GITHUB_PAGES = Math.max(0, Math.min(10, Number.parseInt(process.env.DSH_GITHUB_PAGES ?? '10', 10)))
 const MAX_DESCRIPTION = 4000
-const allowedCategories = new Set(['ui', 'theme', 'session', 'memory', 'tools', 'skill', 'workflow', 'notify', 'model', 'dev', 'fun', 'other'])
 const packageNamePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 const repositoryPathPattern = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/
@@ -45,6 +45,10 @@ function licenseOf(value) {
 
 function isDirectoryRepository(item) {
   return String(item?.name ?? '').toLowerCase().startsWith('awesome-')
+}
+
+function topicsOf(value) {
+  return Array.isArray(value?.topics) ? value.topics.filter((topic) => typeof topic === 'string') : []
 }
 
 function installHintOf(value) {
@@ -192,11 +196,16 @@ for (const plugin of curated.plugins ?? []) {
   if (validation === undefined) continue
   const githubItem = githubByRepo.get(key)
   const id = entryId(key, installHint, plugin.name ?? identity.split('/')[1], merged)
+  const entryDescription = description(plugin.description)
   merged.set(id, {
     id,
     name: String(plugin.name ?? identity.split('/')[1]).slice(0, 120),
-    description: description(plugin.description),
-    category: allowedCategories.has(plugin.category) ? plugin.category : 'other',
+    description: entryDescription,
+    category: resolvePluginCategory(plugin.category, {
+      name: String(plugin.name ?? identity.split('/')[1]),
+      description: `${entryDescription.zh} ${entryDescription.en}`,
+      topics: topicsOf(githubItem),
+    }),
     repositoryUrl: String(plugin.url),
     license: validation.license ?? licenseOf(githubItem),
     source: validation.source,
@@ -225,7 +234,11 @@ for (const item of github) {
     id,
     name: String(item.name ?? identity).slice(0, 120),
     description: { en: text, zh: text },
-    category: 'other',
+    category: resolvePluginCategory(undefined, {
+      name: String(item.name ?? identity),
+      description: text,
+      topics: topicsOf(item),
+    }),
     repositoryUrl: String(item.html_url),
     license: validation.license ?? licenseOf(item),
     source: validation.source,
@@ -253,5 +266,15 @@ const entries = [...merged.values()].sort((left, right) => {
   return (right.discovery.stars ?? -1) - (left.discovery.stars ?? -1) || left.name.localeCompare(right.name)
 })
 const snapshot = { schemaVersion: 1, generatedAt: checkedAt, entries }
+try {
+  const previous = JSON.parse(await readFile(OUTPUT, 'utf8'))
+  const signature = (value) => JSON.stringify(value, (key, row) => key === 'checkedAt' ? undefined : row)
+  if (signature(previous.entries) === signature(entries)) {
+    process.stdout.write(`registry: unchanged (${entries.length} entries)\n`)
+    process.exit(0)
+  }
+} catch {
+  // A missing or invalid previous snapshot is replaced below.
+}
 await writeFile(OUTPUT, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8')
 process.stdout.write(`registry: wrote ${entries.length} validated entries; rejected ${hints.size - validations.size} of ${hints.size} unique locators (${curated.plugins?.length ?? 0} curated rows, ${github.length} GitHub topic rows)\n`)

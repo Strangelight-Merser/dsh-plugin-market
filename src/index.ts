@@ -14,10 +14,7 @@ export const inject = ['webServer']
 
 export function apply(ctx: Context): void {
   const snapshot = loadBundledRegistry()
-  const registry = new RegistryProvider(snapshot, {
-    githubPages: Number.parseInt(process.env.DSH_MARKET_GITHUB_PAGES ?? '10', 10),
-    ...(process.env.GITHUB_TOKEN === undefined ? {} : { githubToken: process.env.GITHUB_TOKEN }),
-  })
+  const registry = new RegistryProvider(snapshot)
   const lifecycle = PluginLifecycleService.create(() => registry.current(), 'web')
   const api = new HostApi(registry, lifecycle)
   ctx.effect(() => registry.start(), 'dsh-plugin-market: periodic registry refresh')
