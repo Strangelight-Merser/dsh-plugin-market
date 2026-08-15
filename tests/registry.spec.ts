@@ -44,10 +44,10 @@ describe('registry trust boundary', () => {
 
   it('parses the generated multi-source snapshot and keeps one real verified entry', async () => {
     const snapshot = RegistrySnapshotSchema.parse(JSON.parse(await readFile(join(here, '..', 'data', 'registry-v1.json'), 'utf8')))
-    expect(snapshot.entries.length).toBeGreaterThan(400)
+    expect(snapshot.entries.length).toBeGreaterThan(800)
     expect(new Set(snapshot.entries.map((entry) => entry.id)).size).toBe(snapshot.entries.length)
-    expect(snapshot.entries.some((entry) => entry.status === 'candidate')).toBe(true)
-    expect(snapshot.entries.some((entry) => entry.status === 'native')).toBe(true)
+    expect(snapshot.entries.some((entry) => entry.status === 'installable')).toBe(true)
+    expect(snapshot.entries.every((entry) => entry.status === 'blocked' || entry.validation?.manifest === 'pass')).toBe(true)
     expect(snapshot.entries.every((entry) => installBlockReason(entry) === null)).toBe(true)
     const monorepoEntries = snapshot.entries.filter((entry) => entry.installHint?.kind === 'github' && entry.installHint.path !== null)
     expect(monorepoEntries.length).toBeGreaterThan(0)
@@ -58,6 +58,14 @@ describe('registry trust boundary', () => {
       license: 'MIT',
       source: { kind: 'npm', packageName: 'dsh-find-plugin', version: '0.3.6' },
     }))
+  })
+
+  it('keeps every manually reviewed recommendation tied to a current catalog entry', async () => {
+    const snapshot = RegistrySnapshotSchema.parse(JSON.parse(await readFile(join(here, '..', 'data', 'registry-v1.json'), 'utf8')))
+    const recommendations = JSON.parse(await readFile(join(here, '..', 'data', 'recommendations.json'), 'utf8')) as { entries: Array<{ id: string }> }
+    const ids = new Set(snapshot.entries.map((entry) => entry.id))
+    expect(recommendations.entries).toHaveLength(6)
+    expect(recommendations.entries.every((entry) => ids.has(entry.id))).toBe(true)
   })
 
   it('builds only exact non-shell install references', () => {
@@ -87,8 +95,14 @@ describe('registry trust boundary', () => {
 
   it('opens installation for every located entry while preserving explicit blocks', () => {
     expect(installBlockReason(verified)).toBeNull()
-    expect(installBlockReason({ ...verified, status: 'native', source: null, evidence: undefined })).toBeNull()
-    expect(installBlockReason({ ...verified, status: 'candidate', source: null, installHint: null, evidence: undefined })).toContain('locator')
+    expect(installBlockReason({
+      ...verified,
+      status: 'installable',
+      source: null,
+      evidence: undefined,
+      validation: { manifest: 'pass', checkedAt: '2026-08-15T00:00:00.000Z', packageName: 'dsh-example' },
+    })).toBeNull()
+    expect(installBlockReason({ ...verified, status: 'installable', source: null, installHint: null, evidence: undefined })).toContain('locator')
     expect(installBlockReason({ ...verified, status: 'blocked' })).toContain('blocked')
   })
 

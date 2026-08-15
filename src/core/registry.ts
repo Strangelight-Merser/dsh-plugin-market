@@ -35,16 +35,23 @@ export const RegistrySourceSchema = z.discriminatedUnion('kind', [
   }).strict(),
 ]).readonly()
 
+export const CatalogValidationSchema = z.object({
+  manifest: z.literal('pass'),
+  checkedAt: z.iso.datetime(),
+  packageName: z.string().regex(packageNamePattern),
+}).strict().readonly()
+
 export const RegistryEntrySchema = z.object({
   id: z.string().min(1).max(200).regex(/^[a-z0-9][a-z0-9:._/-]*$/),
   name: z.string().min(1).max(120),
-  description: z.object({ en: z.string().max(500), zh: z.string().max(500) }).strict(),
+  description: z.object({ en: z.string().max(4000), zh: z.string().max(4000) }).strict(),
   category: z.enum(['ui', 'theme', 'session', 'memory', 'tools', 'skill', 'workflow', 'notify', 'model', 'dev', 'fun', 'other']),
   repositoryUrl: z.url().startsWith('https://github.com/'),
   license: z.string().min(1).nullable(),
   source: RegistrySourceSchema.nullable(),
   installHint: RegistryInstallHintSchema.nullable(),
-  status: z.enum(['candidate', 'native', 'installable', 'verified', 'blocked']),
+  status: z.enum(['installable', 'verified', 'blocked']),
+  validation: CatalogValidationSchema.optional(),
   discovery: z.object({
     sources: z.array(z.enum(['awesome-dsh-plugin', 'github-topic'])).min(1),
     stars: z.number().int().nonnegative().nullable(),
@@ -59,7 +66,14 @@ export const RegistryEntrySchema = z.object({
     dumpConfig: z.literal('pass'),
     boot: z.literal('pass'),
   }).strict().optional(),
-}).strict()
+}).strict().superRefine((entry, context) => {
+  if (entry.status === 'installable' && entry.validation === undefined) {
+    context.addIssue({ code: 'custom', message: 'installable entries require manifest validation', path: ['validation'] })
+  }
+  if (entry.status === 'verified' && (entry.source === null || entry.evidence === undefined)) {
+    context.addIssue({ code: 'custom', message: 'verified entries require exact source and runtime evidence', path: ['source'] })
+  }
+})
 
 export const RegistrySnapshotSchema = z.object({
   schemaVersion: z.literal(1),
@@ -68,6 +82,7 @@ export const RegistrySnapshotSchema = z.object({
 }).strict()
 
 export type RegistrySource = z.infer<typeof RegistrySourceSchema>
+export type CatalogValidation = z.infer<typeof CatalogValidationSchema>
 export type RegistryInstallHint = z.infer<typeof RegistryInstallHintSchema>
 export type RegistryEntry = z.infer<typeof RegistryEntrySchema>
 export type RegistrySnapshot = z.infer<typeof RegistrySnapshotSchema>

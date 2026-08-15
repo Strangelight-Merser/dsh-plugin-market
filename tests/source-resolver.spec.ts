@@ -11,7 +11,8 @@ function entry(input: Record<string, unknown>) {
     repositoryUrl: 'https://github.com/example/plugin',
     license: null,
     source: null,
-    status: 'native',
+    status: 'installable',
+    validation: { manifest: 'pass', checkedAt: '2026-08-15T00:00:00.000Z', packageName: 'example-plugin' },
     ...input,
   })
 }

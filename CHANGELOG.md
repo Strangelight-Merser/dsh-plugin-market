@@ -5,6 +5,26 @@ Versioning after its first public release.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-15
+
+### Added
+
+- Fail-closed catalog admission for every npm or GitHub install locator.
+- Transparent evidence-based assessment for every catalog entry.
+- A manually reviewed recommendation view with explicit use cases and risks.
+- Full, wrapping project descriptions and expandable assessment details.
+- Public evaluation policy and product roadmap.
+
+### Changed
+
+- GitHub Topic results are no longer listed until a native DSH manifest is
+  confirmed at the declared location.
+- Runtime and bundled refresh scan up to GitHub Search's ten-page limit.
+- Simplified catalog states to `installable`, `verified`, and `blocked`.
+- Reworked the README around a minimal, lightweight, easy-to-use product story.
+
+## [0.4.0] - 2026-08-15
+
 ### Added
 
 - Side-effect-free install preflight with exact source confirmation.
