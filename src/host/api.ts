@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import registryData from '../../data/registry-v1.json' with { type: 'json' }
+import recommendationData from '../../data/recommendations.json' with { type: 'json' }
+import { assessEntry } from '../core/assessment.ts'
 import { readManagedState } from '../core/managed-state.ts'
 import { lifecycleState, readProfileManifest } from '../core/profile.ts'
 import { installBlockReason, RegistrySnapshotSchema, SUPPORTED_DSH_VERSION, type RegistrySnapshot } from '../core/registry.ts'
@@ -16,6 +18,17 @@ const ActionRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('install'), id: PluginIdSchema, expectedRef: z.string().min(1).max(500) }).strict(),
   z.object({ action: z.enum(['enable', 'disable', 'uninstall']), id: PluginIdSchema }).strict(),
 ])
+const RecommendationsSchema = z.object({
+  schemaVersion: z.literal(1),
+  reviewedAt: z.iso.datetime(),
+  entries: z.array(z.object({
+    id: PluginIdSchema,
+    summary: z.string().min(1).max(500),
+    bestFor: z.string().min(1).max(300),
+    caution: z.string().min(1).max(500),
+  }).strict()),
+}).strict()
+const recommendations = RecommendationsSchema.parse(recommendationData)
 
 export interface WebRoute {
   kind: 'exact' | 'prefix'
@@ -94,6 +107,10 @@ export class HostApi {
       return
     }
     const snapshot = this.registry.current()
+    const catalogIds = new Set(snapshot.entries.map((entry) => entry.id))
+    const activeRecommendations = recommendations.entries.filter((entry) => catalogIds.has(entry.id))
+    const recommendationById = new Map(activeRecommendations.map((entry) => [entry.id, entry]))
+    const assessmentDate = new Date(snapshot.generatedAt)
     respond(response, {
       status: 200,
       body: {
@@ -113,7 +130,18 @@ export class HostApi {
             reason: 'DSH rc.6 caches client package metadata; arbitrary plugin-set changes require a DSH Web restart.',
           },
         },
-        entries: snapshot.entries.map((entry) => ({ ...entry, installBlockReason: installBlockReason(entry) })),
+        evaluation: {
+          basis: ['DSH manifest', 'runtime evidence', 'maintenance', 'adoption', 'license', 'description'],
+          reviewedAt: recommendations.reviewedAt,
+          recommendationIds: activeRecommendations.map((entry) => entry.id),
+          disclaimer: 'Catalog assessment is not a security audit or compatibility guarantee.',
+        },
+        entries: snapshot.entries.map((entry) => ({
+          ...entry,
+          installBlockReason: installBlockReason(entry),
+          assessment: assessEntry(entry, assessmentDate),
+          recommendation: recommendationById.get(entry.id) ?? null,
+        })),
       },
     }, request.method === 'HEAD')
   }

@@ -100,7 +100,7 @@ async function startRegistry(fixtures: readonly PackedFixture[]): Promise<{ url:
   }
 }
 
-function communityEntry(id: string, name: string, packageName: string, status: 'native' | 'candidate'): Record<string, unknown> {
+function communityEntry(id: string, name: string, packageName: string): Record<string, unknown> {
   return {
     id,
     name,
@@ -110,7 +110,8 @@ function communityEntry(id: string, name: string, packageName: string, status: '
     license: null,
     source: null,
     installHint: { kind: 'npm', packageName },
-    status,
+    status: 'installable',
+    validation: { manifest: 'pass', checkedAt: '2026-08-15T00:00:00.000Z', packageName },
   }
 }
 
@@ -142,8 +143,8 @@ beforeAll(async () => {
     schemaVersion: 1,
     generatedAt: '2026-08-15T00:00:00.000Z',
     entries: [
-      communityEntry('npm:valid-fixture', 'Valid fixture', 'dsh-verified-fixture-plugin', 'native'),
-      communityEntry('npm:invalid-fixture', 'Invalid fixture', 'dsh-verified-invalid-fixture', 'candidate'),
+      communityEntry('npm:valid-fixture', 'Valid fixture', 'dsh-verified-fixture-plugin'),
+      communityEntry('npm:invalid-fixture', 'Invalid fixture', 'dsh-verified-invalid-fixture'),
     ],
   })
   service = new PluginLifecycleService(

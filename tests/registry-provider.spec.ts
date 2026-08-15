@@ -33,7 +33,8 @@ const oldCandidate = {
   license: null,
   source: null,
   installHint: { kind: 'github', repository: 'example/old-candidate', path: null },
-  status: 'candidate',
+  status: 'installable',
+  validation: { manifest: 'pass', checkedAt: '2026-08-15T00:00:00.000Z', packageName: 'old-candidate' },
   discovery: { sources: ['github-topic'], stars: 2, pushedAt: null },
 } as const
 
@@ -96,9 +97,27 @@ const github = {
   ],
 }
 
+const validations = new Map([
+  ['npm:dsh-verified-example', {
+    source: { kind: 'npm', packageName: 'dsh-verified-example', version: '1.2.4' } as const,
+    license: 'Apache-2.0',
+    validation: { manifest: 'pass', checkedAt: '2026-08-15T02:00:00.000Z', packageName: 'dsh-verified-example' } as const,
+  }],
+  ['github:example/new-native', {
+    source: null,
+    license: 'MIT',
+    validation: { manifest: 'pass', checkedAt: '2026-08-15T02:00:00.000Z', packageName: 'new-native' } as const,
+  }],
+  ['github:example/topic-new', {
+    source: null,
+    license: 'MIT',
+    validation: { manifest: 'pass', checkedAt: '2026-08-15T02:00:00.000Z', packageName: 'topic-new' } as const,
+  }],
+])
+
 describe('runtime registry provider', () => {
   it('refreshes discovery fields without promoting or weakening trusted verification', () => {
-    const next = composeLiveSnapshot(snapshot(), snapshot(), curated, github, '2026-08-15T02:00:00.000Z')
+    const next = composeLiveSnapshot(snapshot(), snapshot(), curated, github, '2026-08-15T02:00:00.000Z', validations)
     expect(next.entries).toContainEqual(expect.objectContaining({
       id: verified.id,
       name: 'Verified fresh name',
@@ -108,14 +127,20 @@ describe('runtime registry provider', () => {
       evidence: verified.evidence,
       discovery: expect.objectContaining({ stars: 20 }),
     }))
-    expect(next.entries).toContainEqual(expect.objectContaining({ id: 'github:example/new-native', status: 'native' }))
-    expect(next.entries).toContainEqual(expect.objectContaining({ id: 'github:example/topic-new', status: 'candidate' }))
+    expect(next.entries).toContainEqual(expect.objectContaining({ id: 'github:example/new-native', status: 'installable' }))
+    expect(next.entries).toContainEqual(expect.objectContaining({ id: 'github:example/topic-new', status: 'installable' }))
     expect(next.entries).not.toContainEqual(expect.objectContaining({ id: 'github:example/awesome-dsh-plugins' }))
-    expect(next.entries.find((entry) => entry.id === 'github:example/new-native')?.source).toBeNull()
+    expect(next.entries.find((entry) => entry.id === 'github:example/new-native')?.validation?.packageName).toBe('new-native')
+  })
+
+  it('does not admit a topic hit without a validated DSH manifest', () => {
+    const withoutTopicValidation = new Map([...validations].filter(([key]) => key !== 'github:example/topic-new'))
+    const next = composeLiveSnapshot(snapshot(), snapshot(), curated, github, '2026-08-15T02:00:00.000Z', withoutTopicValidation)
+    expect(next.entries).not.toContainEqual(expect.objectContaining({ id: 'github:example/topic-new' }))
   })
 
   it('keeps cached GitHub-only rows when that optional source is unavailable', () => {
-    const next = composeLiveSnapshot(snapshot(), snapshot(), curated, null, '2026-08-15T02:00:00.000Z')
+    const next = composeLiveSnapshot(snapshot(), snapshot(), curated, null, '2026-08-15T02:00:00.000Z', validations)
     expect(next.entries).toContainEqual(expect.objectContaining({ id: oldCandidate.id }))
   })
 

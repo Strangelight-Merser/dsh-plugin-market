@@ -2,10 +2,13 @@ import {
   RegistryEntrySchema,
   RegistrySnapshotSchema,
   parseInstallHint,
+  type CatalogValidation,
   type RegistryInstallHint,
   type RegistryEntry,
+  type RegistrySource,
   type RegistrySnapshot,
 } from '../core/registry.ts'
+import { CatalogManifestValidator } from './manifest-validator.ts'
 
 const CURATED_URL = 'https://awesome-dsh-plugin.com/plugins.json'
 const GITHUB_SEARCH_URL = 'https://api.github.com/search/repositories'
@@ -27,6 +30,8 @@ export interface RegistryRefreshStatus {
   error: string | null
   curatedRows: number | null
   githubRows: number | null
+  acceptedRows: number | null
+  rejectedRows: number | null
 }
 
 export interface RegistryRefreshResult {
@@ -66,8 +71,8 @@ function repositoryIdentity(value: unknown): string | null {
 
 function description(value: unknown): RegistryEntry['description'] {
   if (!isRecord(value)) return { en: '', zh: '' }
-  const en = typeof value.en === 'string' ? value.en.slice(0, 500) : ''
-  const zh = typeof value.zh === 'string' ? value.zh.slice(0, 500) : en
+  const en = typeof value.en === 'string' ? value.en.slice(0, 4000) : ''
+  const zh = typeof value.zh === 'string' ? value.zh.slice(0, 4000) : en
   return { en, zh }
 }
 
@@ -93,7 +98,17 @@ function trustedOverlay(entry: RegistryEntry, trusted: RegistryEntry | undefined
 }
 
 function priority(status: RegistryEntry['status']): number {
-  return { verified: 0, native: 1, installable: 2, candidate: 3, blocked: 4 }[status]
+  return { verified: 0, installable: 1, blocked: 2 }[status]
+}
+
+export interface ValidatedCatalogSource {
+  validation: CatalogValidation
+  source: RegistrySource | null
+  license: string | null
+}
+
+export function installHintKey(hint: RegistryInstallHint): string {
+  return hint.kind === 'npm' ? `npm:${hint.packageName}` : `github:${hint.repository}${hint.path ?? ''}`
 }
 
 function entryId(key: string, hint: RegistryInstallHint | null, name: unknown, entries: ReadonlyMap<string, RegistryEntry>): string {
@@ -113,6 +128,7 @@ export function composeLiveSnapshot(
   curatedBody: unknown,
   githubBody: unknown | null,
   generatedAt: string,
+  validations: ReadonlyMap<string, ValidatedCatalogSource>,
 ): RegistrySnapshot {
   const trustedById = new Map(trustedSnapshot.entries.map((entry) => [entry.id, entry]))
   const currentById = new Map(currentSnapshot.entries.map((entry) => [entry.id, entry]))
@@ -137,7 +153,13 @@ export function composeLiveSnapshot(
     const key = identity.toLowerCase()
     curatedRepos.add(key)
     const installHint = parseInstallHint(plugin.install)
+    if (installHint === null) continue
     const id = entryId(key, installHint, plugin.name ?? identity.split('/')[1], merged)
+    const validation = validations.get(installHintKey(installHint))
+    const trusted = trustedById.get(id)
+    const source = validation === undefined ? trusted?.source ?? null : validation.source
+    const manifestValidation = validation?.validation ?? trusted?.validation
+    if (manifestValidation === undefined) continue
     const githubItem = githubByRepo.get(key)
     const previous = currentById.get(id)
     const category = allowedCategories.has(plugin.category as RegistryEntry['category'])
@@ -149,10 +171,11 @@ export function composeLiveSnapshot(
       description: description(plugin.description),
       category,
       repositoryUrl: `https://github.com/${identity}`,
-      license: githubItem === undefined ? previous?.license ?? null : licenseOf(githubItem),
-      source: null,
+      license: validation?.license ?? (githubItem === undefined ? previous?.license ?? null : licenseOf(githubItem)),
+      source,
       installHint,
-      status: 'native',
+      status: 'installable',
+      validation: manifestValidation,
       discovery: {
         sources: githubItem === undefined ? ['awesome-dsh-plugin'] : ['awesome-dsh-plugin', 'github-topic'],
         stars: Number.isInteger(githubItem?.stargazers_count)
@@ -163,7 +186,7 @@ export function composeLiveSnapshot(
           : previous?.discovery?.pushedAt ?? null,
       },
     }
-    merged.set(id, trustedOverlay(liveEntry, trustedById.get(id)))
+    merged.set(id, trustedOverlay(liveEntry, trusted))
   }
 
   if (githubItems !== null) {
@@ -176,24 +199,31 @@ export function composeLiveSnapshot(
       if (curatedRepos.has(key)) continue
       const repositoryUrl = stringValue(item.html_url)
       if (repositoryIdentity(repositoryUrl) === null) continue
-      const text = (stringValue(item.description) ?? '').slice(0, 500)
+      const installHint = { kind: 'github', repository: identity, path: null } as const
+      const validation = validations.get(installHintKey(installHint))
+      const trusted = trustedById.get(id)
+      const source = validation === undefined ? trusted?.source ?? null : validation.source
+      const manifestValidation = validation?.validation ?? trusted?.validation
+      if (manifestValidation === undefined) continue
+      const text = (stringValue(item.description) ?? '').slice(0, 4000)
       const liveEntry: RegistryEntry = {
         id,
         name: (stringValue(item.name) ?? identity).slice(0, 120),
         description: { en: text, zh: text },
         category: 'other',
         repositoryUrl: `https://github.com/${identity}`,
-        license: licenseOf(item),
-        source: null,
-        installHint: { kind: 'github', repository: identity, path: null },
-        status: 'candidate',
+        license: validation?.license ?? licenseOf(item),
+        source,
+        installHint,
+        status: 'installable',
+        validation: manifestValidation,
         discovery: {
           sources: ['github-topic'],
           stars: Number.isInteger(item.stargazers_count) ? item.stargazers_count as number : null,
           pushedAt: typeof item.pushed_at === 'string' ? item.pushed_at : null,
         },
       }
-      merged.set(id, trustedOverlay(liveEntry, trustedById.get(id)))
+      merged.set(id, trustedOverlay(liveEntry, trusted))
     }
   } else {
     for (const entry of currentSnapshot.entries) {
@@ -202,7 +232,7 @@ export function composeLiveSnapshot(
   }
 
   for (const entry of trustedSnapshot.entries) {
-    if (['verified', 'installable', 'blocked'].includes(entry.status) && !merged.has(entry.id)) merged.set(entry.id, entry)
+    if (['verified', 'blocked'].includes(entry.status) && !merged.has(entry.id)) merged.set(entry.id, entry)
   }
 
   const entries = [...merged.values()].sort((left, right) => {
@@ -230,7 +260,7 @@ export class RegistryProvider {
     this.fetcher = options.fetcher ?? fetch
     this.now = options.now ?? (() => new Date())
     this.refreshIntervalMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS
-    this.githubPages = Math.max(0, Math.min(10, options.githubPages ?? 1))
+    this.githubPages = Math.max(0, Math.min(10, options.githubPages ?? 10))
     this.githubToken = options.githubToken
     this.refreshStatus = {
       source: 'bundled',
@@ -242,6 +272,8 @@ export class RegistryProvider {
       error: null,
       curatedRows: null,
       githubRows: null,
+      acceptedRows: null,
+      rejectedRows: null,
     }
   }
 
@@ -310,6 +342,48 @@ export class RegistryProvider {
     return { items }
   }
 
+  private async validateSources(curatedBody: unknown, githubBody: unknown | null): Promise<{
+    validations: Map<string, ValidatedCatalogSource>
+    totalLocators: number
+  }> {
+    const hints = new Map<string, RegistryInstallHint>()
+    if (isRecord(curatedBody) && Array.isArray(curatedBody.plugins)) {
+      for (const plugin of curatedBody.plugins.filter(isRecord)) {
+        const hint = parseInstallHint(plugin.install)
+        if (hint !== null) hints.set(installHintKey(hint), hint)
+      }
+    }
+    if (githubBody !== null && isRecord(githubBody) && Array.isArray(githubBody.items)) {
+      for (const item of githubBody.items.filter(isRecord)) {
+        if (isDirectoryRepository(item)) continue
+        const identity = stringValue(item.full_name)
+        if (identity === null || repositoryIdentity(item.html_url) === null) continue
+        const hint = { kind: 'github', repository: identity, path: null } as const
+        hints.set(installHintKey(hint), hint)
+      }
+    }
+
+    const validator = new CatalogManifestValidator({ fetcher: this.fetcher, now: this.now })
+    const queue = [...hints.entries()]
+    const validations = new Map<string, ValidatedCatalogSource>()
+    let cursor = 0
+    const worker = async (): Promise<void> => {
+      while (cursor < queue.length) {
+        const index = cursor++
+        const row = queue[index]
+        if (row === undefined) return
+        const [key, hint] = row
+        try {
+          validations.set(key, await validator.validate(hint))
+        } catch {
+          // Discovery is intentionally fail-closed: an unproved locator is not catalog data.
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(12, queue.length) }, worker))
+    return { validations, totalLocators: hints.size }
+  }
+
   private async performRefresh(): Promise<RegistryRefreshResult> {
     const attemptAt = this.now().toISOString()
     this.refreshStatus = { ...this.refreshStatus, refreshing: true, lastAttemptAt: attemptAt, error: null }
@@ -328,8 +402,9 @@ export class RegistryProvider {
       }
       githubBody = githubResult.value
       githubError = githubResult.error
+      const { validations, totalLocators } = await this.validateSources(curatedBody, githubBody)
       const generatedAt = this.now().toISOString()
-      const next = composeLiveSnapshot(this.trustedSnapshot, this.snapshot, curatedBody, githubBody, generatedAt)
+      const next = composeLiveSnapshot(this.trustedSnapshot, this.snapshot, curatedBody, githubBody, generatedAt, validations)
       this.snapshot = next
       const curatedRows = isRecord(curatedBody) && Array.isArray(curatedBody.plugins) ? curatedBody.plugins.length : 0
       const githubRows = githubBody !== null && isRecord(githubBody) && Array.isArray(githubBody.items) ? githubBody.items.length : null
@@ -341,6 +416,8 @@ export class RegistryProvider {
         error: githubError === null ? null : `GitHub topic refresh failed; kept cached rows: ${githubError}`,
         curatedRows,
         githubRows,
+        acceptedRows: next.entries.filter((entry) => entry.status !== 'blocked').length,
+        rejectedRows: totalLocators - validations.size,
       }
       this.scheduleNext()
       return { updated: true, status: this.status() }

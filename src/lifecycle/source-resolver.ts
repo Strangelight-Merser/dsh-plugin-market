@@ -1,8 +1,10 @@
 import {
   RegistrySourceSchema,
   type RegistryEntry,
+  type RegistryInstallHint,
   type RegistrySource,
 } from '../core/registry.ts'
+import { assertDshPluginManifest, PluginManifestError } from '../core/plugin-manifest.ts'
 
 const DEFAULT_NPM_REGISTRY = 'https://registry.npmjs.org/'
 const GITHUB_API = 'https://api.github.com'
@@ -40,35 +42,6 @@ function licenseOf(manifest: JsonRecord): string | null {
   return null
 }
 
-function hostEntrypointOf(manifest: JsonRecord): string | null {
-  if (typeof manifest.main === 'string' && manifest.main.length > 0) return manifest.main
-  if (typeof manifest.exports === 'string' && manifest.exports.length > 0) return manifest.exports
-  if (!isRecord(manifest.exports)) return null
-  const root = manifest.exports['.']
-  if (typeof root === 'string' && root.length > 0) return root
-  if (!isRecord(root)) return null
-  for (const condition of ['import', 'default', 'require']) {
-    if (typeof root[condition] === 'string' && root[condition].length > 0) return root[condition]
-  }
-  return null
-}
-
-function assertPluginManifest(manifest: JsonRecord, expectedName?: string): string {
-  if (typeof manifest.name !== 'string' || manifest.name.length === 0) {
-    throw new SourceResolutionError('package manifest has no name')
-  }
-  if (expectedName !== undefined && manifest.name !== expectedName) {
-    throw new SourceResolutionError(`npm package name mismatch for ${expectedName}`)
-  }
-  if (!isRecord(manifest.dsh) || !isRecord(manifest.dsh.bundle) || typeof manifest.dsh.bundle.patch !== 'string') {
-    throw new SourceResolutionError(`${manifest.name} has no dsh.bundle.patch`)
-  }
-  if (hostEntrypointOf(manifest) === null) {
-    throw new SourceResolutionError(`${manifest.name} has no host entrypoint`)
-  }
-  return manifest.name
-}
-
 export class NetworkInstallSourceResolver implements InstallSourceResolver {
   private readonly fetcher: typeof fetch
   private readonly npmRegistryUrl: string
@@ -85,8 +58,12 @@ export class NetworkInstallSourceResolver implements InstallSourceResolver {
       return { source: entry.source, license: entry.license, strictLicense: entry.status === 'verified' }
     }
     if (entry.installHint === null) throw new SourceResolutionError('plugin has no install locator')
-    if (entry.installHint.kind === 'npm') return this.resolveNpm(entry.installHint.packageName)
-    return this.resolveGithub(entry.installHint.repository, entry.installHint.path)
+    return this.resolveHint(entry.installHint)
+  }
+
+  async resolveHint(hint: RegistryInstallHint): Promise<ResolvedInstallSource> {
+    if (hint.kind === 'npm') return this.resolveNpm(hint.packageName)
+    return this.resolveGithub(hint.repository, hint.path)
   }
 
   private async resolveNpm(packageName: string): Promise<ResolvedInstallSource> {
@@ -100,7 +77,7 @@ export class NetworkInstallSourceResolver implements InstallSourceResolver {
       throw new SourceResolutionError(`npm metadata for ${packageName}@${version} is incomplete`)
     }
     const manifest = metadata.versions[version]
-    assertPluginManifest(manifest, packageName)
+    this.assertManifest(manifest, packageName)
     const source = RegistrySourceSchema.parse({ kind: 'npm', packageName, version })
     return { source, license: licenseOf(manifest), strictLicense: false }
   }
@@ -127,7 +104,7 @@ export class NetworkInstallSourceResolver implements InstallSourceResolver {
     if (!isRecord(manifest)) {
       throw new SourceResolutionError(`cannot resolve a package manifest for ${repository}${path ?? ''}`)
     }
-    const packageName = assertPluginManifest(manifest)
+    const packageName = this.assertManifest(manifest)
     const source = RegistrySourceSchema.parse({ kind: 'github', packageName, repository, commit, path })
     return { source, license: licenseOf(manifest), strictLicense: false }
   }
@@ -139,6 +116,15 @@ export class NetworkInstallSourceResolver implements InstallSourceResolver {
       return await response.json()
     } catch {
       throw new SourceResolutionError(`${new URL(url).hostname} returned invalid JSON`)
+    }
+  }
+
+  private assertManifest(manifest: unknown, expectedName?: string): string {
+    try {
+      return assertDshPluginManifest(manifest, expectedName)
+    } catch (error) {
+      if (error instanceof PluginManifestError) throw new SourceResolutionError(error.message)
+      throw error
     }
   }
 }

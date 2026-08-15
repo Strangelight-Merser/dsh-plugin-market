@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-08-15T07:45:00.000Z",
+  "entries": [
+    {
+      "id": "github:awesome-dsh-plugin/dsh-find-plugin",
+      "summary": "在会话里按需求寻找插件，适合第一次探索 DSH 生态。",
+      "bestFor": "想先描述需求、再选择插件的用户",
+      "caution": "目前仅在 macOS 的 DSH 0.1.0-rc.6 完成了本项目的真实运行验证。"
+    },
+    {
+      "id": "github:fishquito7/dsh-skill-viewer",
+      "summary": "直接在 Web 设置中管理 Skills，功能集中，学习成本低。",
+      "bestFor": "经常启用、停用或整理 Skills 的用户",
+      "caution": "清单已检查，但尚未由本项目执行运行时安全审查。"
+    },
+    {
+      "id": "github:bowenliang123/dsh-context",
+      "summary": "把上下文组成、压缩事件和 token 变化做成可读面板。",
+      "bestFor": "排查长会话上下文与 token 消耗的用户",
+      "caution": "清单已检查；具体统计准确性仍取决于当前 DSH 版本。"
+    },
+    {
+      "id": "github:ysr666/dsh-vision-router",
+      "summary": "为文本模型补充图像问答、OCR、裁剪和像素工具，安装后即可使用。",
+      "bestFor": "需要让文本 Agent 处理截图或图片的用户",
+      "caution": "默认视觉链会调用第三方匿名端点；敏感图片应改用可信的本地或自有端点。"
+    },
+    {
+      "id": "github:hellodigua/dsh-share",
+      "summary": "用很少的操作生成会话分享，适合演示和协作。",
+      "bestFor": "需要快速分享 DSH 对话的用户",
+      "caution": "分享前应检查会话中是否含凭证、路径或其他敏感信息。"
+    },
+    {
+      "id": "github:whyihaveyou/dsh-suite/path/packages/plugins/plugin-notify",
+      "summary": "任务完成、出错或待审批时发送本地及多平台通知。",
+      "bestFor": "长任务和离开浏览器后仍需获知进度的用户",
+      "caution": "Webhook 会把事件摘要发送到外部服务，应按组织的数据策略配置。"
+    }
+  ]
+}

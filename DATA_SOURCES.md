@@ -1,7 +1,8 @@
 # Data sources
 
-DSH Plugin Market combines two public discovery sources. Inclusion is metadata,
-not a security review, compatibility certification, or endorsement.
+DSH Plugin Market combines two public discovery sources, then independently
+checks every declared install location. Inclusion is still not a security
+review, compatibility certification, or endorsement.
 
 ## awesome-dsh-plugin
 
@@ -23,8 +24,23 @@ source catalog.
   SPDX license identifier, and repository URL
 
 GitHub metadata is refreshed within the service's published API limits. Search
-results can include repositories that are not installable DSH plugins; the
-market therefore performs a manifest preflight when the user selects install.
+results can include unrelated repositories, so a Topic hit is never admitted by
+itself.
+
+## Admission check
+
+Every unique npm package or GitHub repository path must expose a package
+manifest with all of the following:
+
+- a valid package name;
+- a `dsh.bundle.patch` declaration;
+- a host entry point through `main` or the root `exports` entry.
+
+For npm locators, the check targets the current `latest` package metadata. For
+GitHub locators, it targets `package.json` at the declared path on the default
+branch through raw GitHub content. The result and check time are recorded in the
+snapshot. Installation performs a second preflight and pins the exact npm
+version or GitHub commit shown to the user.
 
 ## Generated snapshot
 
@@ -38,3 +54,5 @@ rewritten into a positive open-source or verified claim.
 
 Verified status is maintained separately in `data/verified-overrides.json` and
 requires version-specific evidence. Live source data cannot grant or extend it.
+Human recommendations are maintained in `data/recommendations.json`; see
+`EVALUATION.md` for criteria and caveats.
