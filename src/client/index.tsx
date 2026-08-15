@@ -59,6 +59,7 @@ interface CatalogResponse {
   entries: CatalogEntry[]
   refresh: RefreshStatus
   evaluation: { recommendationIds: string[] }
+  runtimeInstanceId: string
 }
 
 interface LifecyclePreview {
@@ -75,7 +76,7 @@ interface LifecycleResponse {
   packageName: string
   state: PluginState
   resolvedRef: string
-  runtimeEffect: 'restart-required'
+  runtimeEffect: 'restarting' | 'restart-required'
 }
 
 const styles = `
@@ -152,6 +153,24 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await response.json() as T & { error?: string }
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`)
   return body
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+async function waitForRuntimeRestart(previousInstanceId: string): Promise<boolean> {
+  const deadline = Date.now() + 30_000
+  while (Date.now() < deadline) {
+    await delay(400)
+    try {
+      const catalog = await requestJson<CatalogResponse>(`${API_PREFIX}/catalog`, { cache: 'no-store' })
+      if (catalog.runtimeInstanceId !== previousInstanceId) return true
+    } catch {
+      // The Web process is expected to be briefly unavailable during restart.
+    }
+  }
+  return false
 }
 
 function formatTime(value: string | null): string {
@@ -246,11 +265,21 @@ function MarketSection(): React.ReactElement {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       })
+      if (action === 'install' && result.runtimeEffect === 'restarting') {
+        setConfirmation(null)
+        setNotice(`${result.packageName} 已安装，DSH 正在自动重启…`)
+        const restarted = await waitForRuntimeRestart(catalogResponse?.runtimeInstanceId ?? '')
+        if (restarted) {
+          window.location.reload()
+          return true
+        }
+        setNotice(null)
+        setError(`${result.packageName} 已安装并启用，但自动重启超时。请手动运行 dsh web。`)
+        return true
+      }
       setPendingRestart((current) => new Set(current).add(id))
       await reloadAll()
-      setNotice(action === 'install'
-        ? `${result.packageName} 已安装并启用，重启 DSH 后生效`
-        : `${result.packageName} 已${action === 'enable' ? '启用' : action === 'disable' ? '停用' : '卸载'}，重启 DSH 后生效`)
+      setNotice(`${result.packageName} 已${action === 'enable' ? '启用' : action === 'disable' ? '停用' : '卸载'}，重启 DSH 后生效`)
       return true
     } catch (cause) {
       setError(String(cause))
@@ -425,7 +454,7 @@ function MarketSection(): React.ReactElement {
     {confirmation === null ? null : <div className="dpm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && busy === null) setConfirmation(null) }}>
       <div aria-labelledby="dpm-confirm-title" aria-modal="true" className="dpm-dialog" role="dialog">
         <div className="dpm-dialog-head">
-          <div><h3 id="dpm-confirm-title">安装 {confirmation.entry.name}</h3><p className="dpm-dialog-subtitle">确认来源后将安装并默认启用，重启 DSH 后生效。</p></div>
+          <div><h3 id="dpm-confirm-title">安装 {confirmation.entry.name}</h3><p className="dpm-dialog-subtitle">确认来源后将安装并默认启用，DSH 会自动重启并刷新页面。</p></div>
           <button aria-label="关闭" className="dpm-dialog-close" disabled={busy !== null} onClick={() => setConfirmation(null)} type="button">×</button>
         </div>
         <dl className="dpm-details">

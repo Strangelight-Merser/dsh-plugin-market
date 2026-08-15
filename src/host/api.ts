@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import registryData from '../../data/registry-v1.json' with { type: 'json' }
 import recommendationData from '../../data/recommendations.json' with { type: 'json' }
@@ -8,6 +9,7 @@ import { lifecycleState, readProfileManifest } from '../core/profile.ts'
 import { installBlockReason, RegistrySnapshotSchema, SUPPORTED_DSH_VERSION, type RegistrySnapshot } from '../core/registry.ts'
 import { LifecycleError, PluginLifecycleService, type LifecycleAction } from '../lifecycle/service.ts'
 import { RegistryProvider } from '../registry/provider.ts'
+import { DetachedRuntimeRestarter, type RuntimeRestarter } from './runtime-restart.ts'
 
 export const API_PREFIX = '/api/dsh-market/v1'
 const MAX_BODY_BYTES = 16 * 1024
@@ -86,9 +88,12 @@ export function loadBundledRegistry(): RegistrySnapshot {
 }
 
 export class HostApi {
+  private readonly runtimeInstanceId = randomUUID()
+
   constructor(
     private readonly registry: RegistryProvider,
     private readonly lifecycle: PluginLifecycleService,
+    private readonly restarter: RuntimeRestarter = new DetachedRuntimeRestarter(),
   ) {}
 
   routes(): WebRoute[] {
@@ -116,10 +121,12 @@ export class HostApi {
       body: {
         schemaVersion: snapshot.schemaVersion,
         generatedAt: snapshot.generatedAt,
+        runtimeInstanceId: this.runtimeInstanceId,
         supportedDshVersion: SUPPORTED_DSH_VERSION,
         refresh: this.registry.status(),
         lifecycle: {
           installDefault: 'active',
+          installActivation: 'automatic-restart',
           communityInstall: {
             supported: true,
             exactResolution: true,
@@ -204,7 +211,12 @@ export class HostApi {
         input.id,
         input.action === 'install' ? input.expectedRef : undefined,
       )
-      respond(response, { status: 200, body: result })
+      const restarting = input.action === 'install'
+      respond(response, {
+        status: 200,
+        body: { ...result, runtimeEffect: restarting ? 'restarting' : result.runtimeEffect },
+      })
+      if (restarting) this.restarter.schedule()
     } catch (error) {
       if (error instanceof LifecycleError || error instanceof z.ZodError) {
         respond(response, { status: 409, body: { error: error.message } })
