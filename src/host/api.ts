@@ -89,6 +89,7 @@ export function loadBundledRegistry(): RegistrySnapshot {
 
 export class HostApi {
   private readonly runtimeInstanceId = randomUUID()
+  private readonly pendingRestartIds = new Set<string>()
 
   constructor(
     private readonly registry: RegistryProvider,
@@ -103,6 +104,7 @@ export class HostApi {
       { kind: 'exact', path: `${API_PREFIX}/registry/refresh`, handler: (request, response) => this.refreshRegistry(request, response) },
       { kind: 'exact', path: `${API_PREFIX}/preview`, handler: (request, response) => this.preview(request, response) },
       { kind: 'exact', path: `${API_PREFIX}/actions`, handler: (request, response) => this.action(request, response) },
+      { kind: 'exact', path: `${API_PREFIX}/restart`, handler: (request, response) => this.restart(request, response) },
     ]
   }
 
@@ -122,11 +124,12 @@ export class HostApi {
         schemaVersion: snapshot.schemaVersion,
         generatedAt: snapshot.generatedAt,
         runtimeInstanceId: this.runtimeInstanceId,
+        pendingRestartIds: [...this.pendingRestartIds],
         supportedDshVersion: SUPPORTED_DSH_VERSION,
         refresh: this.registry.status(),
         lifecycle: {
           installDefault: 'active',
-          installActivation: 'automatic-restart',
+          installActivation: 'batched-restart',
           communityInstall: {
             supported: true,
             exactResolution: true,
@@ -211,12 +214,8 @@ export class HostApi {
         input.id,
         input.action === 'install' ? input.expectedRef : undefined,
       )
-      const restarting = input.action === 'install'
-      respond(response, {
-        status: 200,
-        body: { ...result, runtimeEffect: restarting ? 'restarting' : result.runtimeEffect },
-      })
-      if (restarting) this.restarter.schedule()
+      this.pendingRestartIds.add(input.id)
+      respond(response, { status: 200, body: result })
     } catch (error) {
       if (error instanceof LifecycleError || error instanceof z.ZodError) {
         respond(response, { status: 409, body: { error: error.message } })
@@ -224,6 +223,23 @@ export class HostApi {
       }
       this.internalError(response, error)
     }
+  }
+
+  private restart(request: IncomingMessage, response: ServerResponse): void {
+    if (request.method !== 'POST') {
+      respond(response, { status: 405, body: { error: 'method not allowed' } })
+      return
+    }
+    if (!isSameOrigin(request.headers.origin, request.headers.host)) {
+      respond(response, { status: 403, body: { error: 'same-origin request required' } })
+      return
+    }
+    if (this.pendingRestartIds.size === 0) {
+      respond(response, { status: 409, body: { error: 'no plugin changes are pending restart' } })
+      return
+    }
+    respond(response, { status: 202, body: { restarting: true, pendingCount: this.pendingRestartIds.size } })
+    this.restarter.schedule()
   }
 
   private async preview(request: IncomingMessage, response: ServerResponse): Promise<void> {

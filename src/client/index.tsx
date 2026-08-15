@@ -60,6 +60,7 @@ interface CatalogResponse {
   refresh: RefreshStatus
   evaluation: { recommendationIds: string[] }
   runtimeInstanceId: string
+  pendingRestartIds: string[]
 }
 
 interface LifecyclePreview {
@@ -76,13 +77,14 @@ interface LifecycleResponse {
   packageName: string
   state: PluginState
   resolvedRef: string
-  runtimeEffect: 'restarting' | 'restart-required'
+  runtimeEffect: 'restart-required'
 }
 
 const styles = `
   .dpm { --dpm-accent:#766cf6; --dpm-good:#35b77a; --dpm-warn:#d59b35; box-sizing:border-box; color:inherit; container-type:inline-size; min-height:360px; padding:20px 22px 30px; width:100%; }
   .dpm *, .dpm *::before, .dpm *::after { box-sizing:border-box; }
   .dpm-header { align-items:center; display:flex; gap:16px; justify-content:space-between; margin-bottom:18px; }
+  .dpm-header-actions { align-items:center; display:flex; gap:5px; }
   .dpm-title { font-size:21px; letter-spacing:-.02em; line-height:1.2; margin:0; }
   .dpm-summary { font-size:11px; margin:5px 0 0; opacity:.55; }
   .dpm-button { align-items:center; background:transparent; border:1px solid color-mix(in srgb,currentColor 16%,transparent); border-radius:8px; color:inherit; cursor:pointer; display:inline-flex; font:inherit; font-size:12px; font-weight:650; gap:5px; justify-content:center; min-height:32px; padding:6px 10px; transition:background .15s,border-color .15s,transform .15s; }
@@ -201,12 +203,12 @@ function MarketSection(): React.ReactElement {
   const [busy, setBusy] = React.useState<string | null>(null)
   const [previewing, setPreviewing] = React.useState<string | null>(null)
   const [registryBusy, setRegistryBusy] = React.useState(false)
+  const [restartBusy, setRestartBusy] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const [categoryFilter, setCategoryFilter] = React.useState<'all' | PluginCategory>('all')
   const [sortOrder, setSortOrder] = React.useState<CatalogSort>('stars')
   const [view, setView] = React.useState<'recommended' | 'market' | 'installed'>('recommended')
   const [limit, setLimit] = React.useState(PAGE_SIZE)
-  const [pendingRestart, setPendingRestart] = React.useState<Set<string>>(() => new Set())
   const [unavailable, setUnavailable] = React.useState<Set<string>>(() => new Set())
   const [confirmation, setConfirmation] = React.useState<{ entry: CatalogEntry; preview: LifecyclePreview } | null>(null)
 
@@ -265,27 +267,36 @@ function MarketSection(): React.ReactElement {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       })
-      if (action === 'install' && result.runtimeEffect === 'restarting') {
-        setConfirmation(null)
-        setNotice(`${result.packageName} 已安装，DSH 正在自动重启…`)
-        const restarted = await waitForRuntimeRestart(catalogResponse?.runtimeInstanceId ?? '')
-        if (restarted) {
-          window.location.reload()
-          return true
-        }
-        setNotice(null)
-        setError(`${result.packageName} 已安装并启用，但自动重启超时。请手动运行 dsh web。`)
-        return true
-      }
-      setPendingRestart((current) => new Set(current).add(id))
       await reloadAll()
-      setNotice(`${result.packageName} 已${action === 'enable' ? '启用' : action === 'disable' ? '停用' : '卸载'}，重启 DSH 后生效`)
+      const verb = action === 'install' ? '安装并默认启用' : action === 'enable' ? '启用' : action === 'disable' ? '停用' : '卸载'
+      setNotice(`${result.packageName} 已${verb}，可继续操作，完成后统一重启`)
       return true
     } catch (cause) {
       setError(String(cause))
       return false
     } finally {
       setBusy(null)
+    }
+  }
+
+  const restartRuntime = async (): Promise<void> => {
+    setRestartBusy(true)
+    setError(null)
+    setNotice('DSH 正在重启…')
+    try {
+      await requestJson(`${API_PREFIX}/restart`, { method: 'POST' })
+      const restarted = await waitForRuntimeRestart(catalogResponse?.runtimeInstanceId ?? '')
+      if (restarted) {
+        window.location.reload()
+        return
+      }
+      setNotice(null)
+      setError('DSH 重启超时，请手动重新运行 dsh web。')
+    } catch (cause) {
+      setNotice(null)
+      setError(`重启失败：${String(cause)}`)
+    } finally {
+      setRestartBusy(false)
     }
   }
 
@@ -308,6 +319,7 @@ function MarketSection(): React.ReactElement {
   }
 
   const catalog = catalogResponse?.entries ?? []
+  const pendingRestart = new Set(catalogResponse?.pendingRestartIds ?? [])
   const installedByPackage = new Map(installed.map((plugin) => [plugin.packageName, plugin]))
   const installedById = new Map(installed.filter((plugin) => plugin.id !== null).map((plugin) => [plugin.id!, plugin]))
   const catalogById = new Map(catalog.map((entry) => [entry.id, entry]))
@@ -365,9 +377,14 @@ function MarketSection(): React.ReactElement {
         <h2 className="dpm-title">插件市场</h2>
         <p className="dpm-summary">{catalogResponse === null ? '正在加载…' : `${catalog.length} 个插件 · ${lastSync}`}</p>
       </div>
-      <button aria-label="更新插件目录" className="dpm-button dpm-icon-button" disabled={registryBusy} onClick={() => { void refreshRegistry() }} title={refreshTitle} type="button">
-        {registryBusy ? '…' : '↻'}
-      </button>
+      <div className="dpm-header-actions">
+        {pendingRestart.size === 0 ? null : <button className="dpm-button dpm-button-primary" disabled={restartBusy || busy !== null} onClick={() => { void restartRuntime() }} type="button">
+          {restartBusy ? '重启中…' : `重启生效（${pendingRestart.size}）`}
+        </button>}
+        <button aria-label="更新插件目录" className="dpm-button dpm-icon-button" disabled={registryBusy || restartBusy} onClick={() => { void refreshRegistry() }} title={refreshTitle} type="button">
+          {registryBusy ? '…' : '↻'}
+        </button>
+      </div>
     </header>
 
     {error === null ? null : <p className="dpm-alert dpm-alert-error" role="alert"><span>{error}</span><button aria-label="关闭" onClick={() => setError(null)} type="button">×</button></p>}
@@ -454,7 +471,7 @@ function MarketSection(): React.ReactElement {
     {confirmation === null ? null : <div className="dpm-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && busy === null) setConfirmation(null) }}>
       <div aria-labelledby="dpm-confirm-title" aria-modal="true" className="dpm-dialog" role="dialog">
         <div className="dpm-dialog-head">
-          <div><h3 id="dpm-confirm-title">安装 {confirmation.entry.name}</h3><p className="dpm-dialog-subtitle">确认来源后将安装并默认启用，DSH 会自动重启并刷新页面。</p></div>
+          <div><h3 id="dpm-confirm-title">安装 {confirmation.entry.name}</h3><p className="dpm-dialog-subtitle">确认来源后将安装并默认启用。你可以继续操作其他插件，最后统一重启生效。</p></div>
           <button aria-label="关闭" className="dpm-dialog-close" disabled={busy !== null} onClick={() => setConfirmation(null)} type="button">×</button>
         </div>
         <dl className="dpm-details">
