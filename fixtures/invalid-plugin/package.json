@@ -1,0 +1,7 @@
+{
+  "name": "dsh-verified-invalid-fixture",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./missing.js",
+  "license": "MIT"
+}

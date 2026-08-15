@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/Strangelight-Merser/dsh-plugin-market/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue.
+  - name: Add a plugin to the shared catalog
+    url: https://github.com/awesome-dsh-plugin/awesome-dsh-plugin
+    about: General catalog submissions belong in the upstream directory.

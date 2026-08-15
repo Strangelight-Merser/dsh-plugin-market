@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-verified-fixture-plugin
+      name: 'dsh-verified-fixture-plugin'

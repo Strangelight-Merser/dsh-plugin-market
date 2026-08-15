@@ -1,0 +1,20 @@
+{
+  "github:awesome-dsh-plugin/dsh-find-plugin": {
+    "license": "MIT",
+    "source": {
+      "kind": "npm",
+      "packageName": "dsh-find-plugin",
+      "version": "0.3.6"
+    },
+    "status": "verified",
+    "evidence": {
+      "dshVersion": "0.1.0-rc.6",
+      "checkedAt": "2026-08-15T04:20:27.000Z",
+      "platform": "darwin",
+      "manifest": "pass",
+      "artifacts": "pass",
+      "dumpConfig": "pass",
+      "boot": "pass"
+    }
+  }
+}

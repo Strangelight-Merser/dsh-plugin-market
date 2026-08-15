@@ -1,0 +1,13 @@
+{
+  "name": "dsh-verified-fixture-plugin",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "license": "MIT",
+  "files": ["index.js", "cordis.patch.yml"],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

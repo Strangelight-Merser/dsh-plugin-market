@@ -1,0 +1,4 @@
+# Native DSH profile bundle.
+- insert:
+    - id: dsh-plugin-market
+      name: 'dsh-plugin-market'

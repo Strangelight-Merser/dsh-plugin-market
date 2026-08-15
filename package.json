@@ -1,0 +1,88 @@
+{
+  "name": "dsh-plugin-market",
+  "version": "0.4.0",
+  "private": true,
+  "description": "A small, open plugin market for DeepSeek Harness",
+  "type": "module",
+  "packageManager": "pnpm@11.5.1",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.host.json --noEmit --pretty false && tsc -p tsconfig.client.json --noEmit --pretty false && tsc -p tsconfig.test.json --noEmit --pretty false",
+    "test": "vitest run --reporter=verbose",
+    "test:contract": "vitest run --config vitest.contract.config.ts --reporter=verbose",
+    "registry:refresh": "node scripts/build-registry.mjs",
+    "build:host": "tsdown --config tsdown.host.config.ts",
+    "build:client": "tsdown --config tsdown.client.config.ts",
+    "build:types": "tsc -p tsconfig.types.json --pretty false",
+    "build": "pnpm run typecheck && pnpm run build:host && pnpm run build:types && pnpm run build:client && test -f lib/index.js && test ! -e lib/index.mjs && test -f lib/types/index.d.ts && test -f client/client.js",
+    "prepack": "pnpm run build"
+  },
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./client/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "data",
+    "cordis.patch.yml",
+    "DATA_SOURCES.md",
+    "SECURITY.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Strangelight-Merser/dsh-plugin-market.git"
+  },
+  "homepage": "https://github.com/Strangelight-Merser/dsh-plugin-market#readme",
+  "bugs": {
+    "url": "https://github.com/Strangelight-Merser/dsh-plugin-market/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "plugin-market"
+  ],
+  "author": "Strangelight-Merser",
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@types/node": "^26.2.0",
+    "@types/react": "~18.3.1",
+    "react": "^18.3.1",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  }
+}
