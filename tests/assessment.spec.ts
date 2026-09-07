@@ -45,4 +45,14 @@ describe('catalog assessment', () => {
     expect(assessEntry(verified, reference).score).toBeGreaterThan(assessEntry(base, reference).score)
     expect(assessEntry(verified, reference).cautions).not.toContain('尚未进行运行时安全审查')
   })
+  it('does not award open-source credit to proprietary or unrecognized license declarations', () => {
+    const approved = assessEntry(installable(), reference)
+    for (const license of ['UNLICENSED', 'Proprietary', 'SEE LICENSE IN LICENSE.txt']) {
+      const result = assessEntry(installable({ license }), reference)
+      expect(result.score).toBe(approved.score - 10)
+      expect(result.cautions).toContain('未识别到已确认的开源许可证')
+      expect(result.reasons).not.toContain(`许可证 ${license}`)
+    }
+  })
+
 })
