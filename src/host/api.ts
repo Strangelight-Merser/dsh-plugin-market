@@ -6,6 +6,7 @@ import recommendationData from '../../data/recommendations.json' with { type: 'j
 import { assessEntry } from '../core/assessment.ts'
 import { readManagedState } from '../core/managed-state.ts'
 import { lifecycleState, readProfileManifest } from '../core/profile.ts'
+import { ProfileLockedError } from '../core/profile-lock.ts'
 import { installBlockReason, RegistrySnapshotSchema, SUPPORTED_DSH_VERSION, type RegistrySnapshot } from '../core/registry.ts'
 import { LifecycleError, PluginLifecycleService, type LifecycleAction } from '../lifecycle/service.ts'
 import { RegistryProvider } from '../registry/provider.ts'
@@ -58,13 +59,22 @@ function respond(response: ServerResponse, result: JsonResponse, head = false): 
   response.end(head ? undefined : body)
 }
 
-export function isSameOrigin(origin: string | undefined, host: string | undefined): boolean {
+export function isSameOrigin(origin: string | undefined, host: string | undefined, protocol = 'http:'): boolean {
   if (origin === undefined || host === undefined) return false
   try {
-    return new URL(origin).host === host
+    const parsed = new URL(origin)
+    return parsed.origin === origin && parsed.protocol === protocol && parsed.host === host
   } catch {
     return false
   }
+}
+
+function requestIsSameOrigin(request: IncomingMessage): boolean {
+  return isSameOrigin(request.headers.origin, request.headers.host, 'encrypted' in request.socket && request.socket.encrypted ? 'https:' : 'http:')
+}
+
+function hasJsonContentType(request: IncomingMessage): boolean {
+  return (request.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase() === 'application/json'
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -90,6 +100,8 @@ export function loadBundledRegistry(): RegistrySnapshot {
 export class HostApi {
   private readonly runtimeInstanceId = randomUUID()
   private readonly pendingRestartIds = new Set<string>()
+  private mutating = false
+  private restarting = false
 
   constructor(
     private readonly registry: RegistryProvider,
@@ -117,7 +129,7 @@ export class HostApi {
     const catalogIds = new Set(snapshot.entries.map((entry) => entry.id))
     const activeRecommendations = recommendations.entries.filter((entry) => catalogIds.has(entry.id))
     const recommendationById = new Map(activeRecommendations.map((entry) => [entry.id, entry]))
-    const assessmentDate = new Date(snapshot.generatedAt)
+    const assessmentDate = new Date()
     respond(response, {
       status: 200,
       body: {
@@ -161,7 +173,7 @@ export class HostApi {
       respond(response, { status: 405, body: { error: 'method not allowed' } })
       return
     }
-    if (!isSameOrigin(request.headers.origin, request.headers.host)) {
+    if (!requestIsSameOrigin(request)) {
       respond(response, { status: 403, body: { error: 'same-origin request required' } })
       return
     }
@@ -181,12 +193,13 @@ export class HostApi {
         ...Object.keys(manifest.dependencies ?? {}),
         ...Object.keys(manifest.devDependencies ?? {}),
         ...(manifest.dsh?.profile?.bundles ?? []),
+        ...Object.keys(managerState.plugins),
       ])
       const plugins = [...packageNames].sort().map((packageName) => ({
         packageName,
-        managed: managerState.plugins[packageName] !== undefined,
-        id: managerState.plugins[packageName]?.id ?? null,
-        state: lifecycleState(manifest, packageName, managerState.plugins[packageName] !== undefined),
+        managed: Object.hasOwn(managerState.plugins, packageName),
+        id: Object.hasOwn(managerState.plugins, packageName) ? managerState.plugins[packageName]!.id : null,
+        state: lifecycleState(manifest, packageName, Object.hasOwn(managerState.plugins, packageName)),
       }))
       respond(response, { status: 200, body: { profile: this.lifecycle.profile, plugins } }, request.method === 'HEAD')
     } catch (error) {
@@ -199,14 +212,19 @@ export class HostApi {
       respond(response, { status: 405, body: { error: 'method not allowed' } })
       return
     }
-    if (!isSameOrigin(request.headers.origin, request.headers.host)) {
+    if (!requestIsSameOrigin(request)) {
       respond(response, { status: 403, body: { error: 'same-origin request required' } })
       return
     }
-    if (!(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+    if (!hasJsonContentType(request)) {
       respond(response, { status: 415, body: { error: 'application/json required' } })
       return
     }
+    if (this.mutating || this.restarting) {
+      respond(response, { status: 409, body: { error: 'another plugin operation or restart is in progress' } })
+      return
+    }
+    this.mutating = true
     try {
       const input = ActionRequestSchema.parse(await readJsonBody(request))
       const result = await this.lifecycle.perform(
@@ -217,29 +235,41 @@ export class HostApi {
       this.pendingRestartIds.add(input.id)
       respond(response, { status: 200, body: result })
     } catch (error) {
-      if (error instanceof LifecycleError || error instanceof z.ZodError) {
+      if (error instanceof LifecycleError || error instanceof ProfileLockedError || error instanceof z.ZodError) {
         respond(response, { status: 409, body: { error: error.message } })
         return
       }
       this.internalError(response, error)
+    } finally {
+      this.mutating = false
     }
   }
 
-  private restart(request: IncomingMessage, response: ServerResponse): void {
+  private async restart(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (request.method !== 'POST') {
       respond(response, { status: 405, body: { error: 'method not allowed' } })
       return
     }
-    if (!isSameOrigin(request.headers.origin, request.headers.host)) {
+    if (!requestIsSameOrigin(request)) {
       respond(response, { status: 403, body: { error: 'same-origin request required' } })
+      return
+    }
+    if (this.mutating || this.restarting) {
+      respond(response, { status: 409, body: { error: 'another plugin operation or restart is in progress' } })
       return
     }
     if (this.pendingRestartIds.size === 0) {
       respond(response, { status: 409, body: { error: 'no plugin changes are pending restart' } })
       return
     }
-    respond(response, { status: 202, body: { restarting: true, pendingCount: this.pendingRestartIds.size } })
-    this.restarter.schedule()
+    this.restarting = true
+    try {
+      await this.restarter.schedule()
+      respond(response, { status: 202, body: { restarting: true, pendingCount: this.pendingRestartIds.size } })
+    } catch (error) {
+      this.restarting = false
+      this.internalError(response, error)
+    }
   }
 
   private async preview(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -247,11 +277,11 @@ export class HostApi {
       respond(response, { status: 405, body: { error: 'method not allowed' } })
       return
     }
-    if (!isSameOrigin(request.headers.origin, request.headers.host)) {
+    if (!requestIsSameOrigin(request)) {
       respond(response, { status: 403, body: { error: 'same-origin request required' } })
       return
     }
-    if (!(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+    if (!hasJsonContentType(request)) {
       respond(response, { status: 415, body: { error: 'application/json required' } })
       return
     }

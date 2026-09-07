@@ -7,7 +7,7 @@ const packageNamePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const exactVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
 const shaPattern = /^[0-9a-f]{40}$/
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
-const repositoryPathPattern = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/
+const repositoryPathPattern = /^\/(?!(?:.*\/)?\.{1,2}(?:\/|$))(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/
 
 export const RegistryInstallHintSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -74,13 +74,22 @@ export const RegistryEntrySchema = z.object({
   if (entry.status === 'verified' && (entry.source === null || entry.evidence === undefined)) {
     context.addIssue({ code: 'custom', message: 'verified entries require exact source and runtime evidence', path: ['source'] })
   }
+  if (entry.source !== null && entry.validation !== undefined && entry.source.packageName !== entry.validation.packageName) {
+    context.addIssue({ code: 'custom', message: 'source and validated package names differ', path: ['source'] })
+  }
 })
 
 export const RegistrySnapshotSchema = z.object({
   schemaVersion: z.literal(1),
   generatedAt: z.iso.datetime(),
   entries: z.array(RegistryEntrySchema),
-}).strict()
+}).strict().superRefine((snapshot, context) => {
+  const ids = new Set<string>()
+  snapshot.entries.forEach((entry, index) => {
+    if (ids.has(entry.id)) context.addIssue({ code: 'custom', message: 'duplicate plugin id', path: ['entries', index, 'id'] })
+    ids.add(entry.id)
+  })
+})
 
 export type RegistrySource = z.infer<typeof RegistrySourceSchema>
 export type CatalogValidation = z.infer<typeof CatalogValidationSchema>
@@ -110,7 +119,8 @@ export function parseInstallHint(value: unknown): RegistryInstallHint | null {
   if (locator.startsWith('github:')) {
     const match = /^github:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?:#path:(\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+))?$/.exec(locator)
     if (match === null) return null
-    return RegistryInstallHintSchema.parse({ kind: 'github', repository: match[1], path: match[2] ?? null })
+    const parsed = RegistryInstallHintSchema.safeParse({ kind: 'github', repository: match[1], path: match[2] ?? null })
+    return parsed.success ? parsed.data : null
   }
   const parsed = RegistryInstallHintSchema.safeParse({ kind: 'npm', packageName: locator })
   return parsed.success ? parsed.data : null

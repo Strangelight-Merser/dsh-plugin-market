@@ -23,4 +23,14 @@ describe('argv-only command runner', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+  it('terminates a hung command before rejecting and releasing its caller', async () => {
+    const runner = new SpawnDshRunner(tmpdir(), process.execPath, {}, 200)
+    await expect(runner.run(['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 10)"])).rejects.toThrow('timed out')
+  })
+
+  it('settles missing executables without leaving a timeout running', async () => {
+    const runner = new SpawnDshRunner(tmpdir(), '/does-not-exist/dsh')
+    await expect(runner.run([])).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
 })

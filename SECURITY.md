@@ -16,7 +16,8 @@ mitigation. You should receive an acknowledgement within seven days.
 
 The market reduces accidental and supply-chain risk; it is not a sandbox.
 
-- State-changing HTTP requests require the exact page origin and JSON input.
+- State-changing HTTP requests require the exact page origin. Preview and
+  lifecycle requests additionally require JSON input.
 - Installation uses argument arrays, not shell command strings.
 - npm versions and GitHub commits are resolved exactly and shown before the
   user confirms installation.

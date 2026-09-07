@@ -16,7 +16,7 @@
 
 ## 30 秒上手
 
-安装：
+已发布的稳定版（v0.5.0）：
 
 ```bash
 dsh plugin --profile web add --ignore-scripts https://github.com/Strangelight-Merser/dsh-plugin-market/releases/download/v0.5.0/dsh-plugin-market-0.5.0.tgz
@@ -29,6 +29,19 @@ dsh web
 ```
 
 打开 **设置 → 插件市场**。当前版本适配 `@deepseek-ai/dsh@0.1.0-rc.6` 的 Web profile。
+
+当前 `main` 为 0.6.x 开发版，下列分类、在线刷新和批量重启功能属于开发版。
+需要使用本次修复时，从源码构建安装（Node 22.19+、pnpm 11.5.1）：
+
+```bash
+git clone https://github.com/Strangelight-Merser/dsh-plugin-market.git
+cd dsh-plugin-market
+pnpm install --frozen-lockfile
+pnpm pack --pack-destination .
+dsh plugin --profile web add --ignore-scripts "$PWD/dsh-plugin-market-0.6.0.tgz"
+```
+
+安装后重新启动 `dsh web`。
 
 ## 能做什么
 
