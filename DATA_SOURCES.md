@@ -58,11 +58,12 @@ Transport failures abort publication rather than silently dropping plugins.
 
 Repository maintainers must enable **Settings → Actions → General → Workflow
 permissions → Allow GitHub Actions to create and approve pull requests**.
-The workflow requests contents, pull-request, and Actions write permissions;
-it explicitly dispatches CI for the bot branch and does not bypass branch
-protection or automatically approve or merge the pull request. Registry-only PRs
-use the explicitly dispatched CI run; hand-authored registry-only PRs must also
-dispatch `CI` for their branch before merging. Installed markets fetch
+The workflow requests contents and pull-request write permissions. GitHub puts
+PR workflows created by `GITHUB_TOKEN` into an approval-required state. A
+maintainer reviews the generated diff and selects **Approve workflows to run**;
+the normal Linux/macOS and dependency-review checks then run on GitHub's test
+merge commit. Merge only after those required checks pass. The workflow does
+not approve or merge its own PR and needs no long-lived personal token. Installed markets fetch
 the published snapshot from this repository with one request on startup, every
 six hours, or when the user presses refresh. They keep the bundled snapshot if
 the request fails or the published copy is older. Individual plugin manifests

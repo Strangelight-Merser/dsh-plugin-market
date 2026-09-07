@@ -35,6 +35,5 @@ Refresh the plugin registry from the public discovery sources. Package manifests
 BODY
   gh pr create --head "$branch" --base main --title 'chore: refresh plugin registry' --body-file "$body"
 fi
-# GITHUB_TOKEN-created PRs need approval for automatic PR workflows.
-# Explicit dispatch runs the same required checks without a long-lived token.
-gh workflow run ci.yml --ref "$branch"
+# GitHub requires a maintainer to approve PR workflows created by GITHUB_TOKEN.
+# Use the real pull_request checks on GitHub's test merge commit.

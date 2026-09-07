@@ -10,7 +10,7 @@ const exec = promisify(execFile)
 const script = fileURLToPath(new URL('../scripts/propose-registry.sh', import.meta.url))
 
 describe('registry PR publication', () => {
-  it('updates one bot branch without pushing main and dispatches CI for each change', async () => {
+  it('updates one bot branch without pushing main and reuses the PR for review', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-registry-pr-'))
     const repository = join(root, 'work')
     const remote = join(root, 'remote.git')
@@ -46,7 +46,7 @@ describe('registry PR publication', () => {
       expect((await exec('git', ['--git-dir', remote, 'show', 'automation/registry-refresh:data/registry-v1.json'])).stdout).toBe('second refresh')
       const commands = await readFile(log, 'utf8')
       expect(commands.match(/^pr create /gm)).toHaveLength(1)
-      expect(commands.match(/^workflow run ci.yml --ref automation\/registry-refresh$/gm)).toHaveLength(2)
+      expect(commands).not.toContain('workflow run')
       await exec('bash', [script], { cwd: repository, env })
       expect(await readFile(log, 'utf8')).toBe(commands)
     } finally { await rm(root, { recursive: true, force: true }) }
