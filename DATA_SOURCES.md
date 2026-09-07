@@ -48,7 +48,17 @@ version or GitHub commit shown to the user.
 its generation timestamp. It is distributed as an offline fallback under this
 repository's MIT license to the extent permitted by the source licenses.
 
-The repository rebuilds this snapshot every six hours. Installed markets fetch
+The repository rebuilds this snapshot every six hours and proposes changes in
+one reusable `automation/registry-refresh` pull request. The generated snapshot
+must pass the same schema used by the client and the required CI checks before
+it is merged into `main`. Updates become available to users after that merge.
+Transport failures abort publication rather than silently dropping plugins.
+
+Repository maintainers must enable **Settings → Actions → General → Workflow
+permissions → Allow GitHub Actions to create and approve pull requests**.
+The workflow requests contents, pull-request, and Actions write permissions;
+it explicitly dispatches CI for the bot branch and does not bypass branch
+protection or automatically approve or merge the pull request. Installed markets fetch
 the published snapshot from this repository with one request on startup, every
 six hours, or when the user presses refresh. They keep the bundled snapshot if
 the request fails or the published copy is older. Individual plugin manifests

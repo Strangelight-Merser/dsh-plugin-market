@@ -78,9 +78,10 @@ describe('published registry updates', () => {
 
     const result = await provider.refresh()
 
-    expect(result.updated).toBe(true)
+    expect(result.updated).toBe(false)
     expect(provider.current().generatedAt).toBe('2026-08-15T04:00:00.000Z')
-    expect(provider.status().source).toBe('live')
+    expect(provider.status().source).toBe('bundled')
+    expect(result.status.error).toContain('older')
   })
 
   it('keeps the last good snapshot when online update fails', async () => {
@@ -116,4 +117,15 @@ describe('published registry updates', () => {
     stop()
     expect(provider.status().nextRefreshAt).toBeNull()
   })
+  it('does not schedule another refresh if stopped while a request is pending', async () => {
+    let complete!: (response: Response) => void
+    const provider = new RegistryProvider(snapshot(), { fetcher: () => new Promise((resolve) => { complete = resolve }) })
+    const stop = provider.start()
+    const result = provider.refresh()
+    stop()
+    complete(response(snapshot()))
+    await result
+    expect(provider.status().nextRefreshAt).toBeNull()
+  })
+
 })

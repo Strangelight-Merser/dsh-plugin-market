@@ -44,7 +44,7 @@ export interface RestartLaunch {
   environment: NodeJS.ProcessEnv
 }
 
-export function launchDetachedRestart(launch: RestartLaunch): void {
+export async function launchDetachedRestart(launch: RestartLaunch): Promise<void> {
   if (!Number.isSafeInteger(launch.parentPid) || launch.parentPid <= 0) throw new Error('invalid parent process id')
   if ([launch.executable, launch.cwd, ...launch.args].some((value) => value.includes('\0'))) {
     throw new Error('restart command contains NUL')
@@ -64,11 +64,15 @@ export function launchDetachedRestart(launch: RestartLaunch): void {
     stdio: 'ignore',
     windowsHide: true,
   })
+  await new Promise<void>((resolve, reject) => {
+    helper.once('error', reject)
+    helper.once('spawn', resolve)
+  })
   helper.unref()
 }
 
 export interface RuntimeRestarter {
-  schedule(): void
+  schedule(): void | Promise<void>
 }
 
 export class DetachedRuntimeRestarter implements RuntimeRestarter {
@@ -76,7 +80,7 @@ export class DetachedRuntimeRestarter implements RuntimeRestarter {
 
   constructor(
     private readonly delayMs = 500,
-    private readonly launch = () => launchDetachedRestart({
+    private readonly launch: () => void | Promise<void> = () => launchDetachedRestart({
       parentPid: process.pid,
       executable: process.execPath,
       args: process.argv.slice(1),
@@ -86,10 +90,15 @@ export class DetachedRuntimeRestarter implements RuntimeRestarter {
     private readonly terminate = () => process.kill(process.pid, 'SIGTERM'),
   ) {}
 
-  schedule(): void {
+  async schedule(): Promise<void> {
     if (this.scheduled) return
     this.scheduled = true
-    this.launch()
+    try {
+      await this.launch()
+    } catch (error) {
+      this.scheduled = false
+      throw error
+    }
     const timer = setTimeout(this.terminate, this.delayMs)
     timer.unref()
   }

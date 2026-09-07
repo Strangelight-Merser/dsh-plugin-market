@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { writeManagedState } from '../src/core/managed-state.ts'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -30,6 +34,30 @@ afterEach(async () => {
     server.close((error) => error === undefined ? resolve() : reject(error))
   })))
 })
+
+async function serve(lifecycle: Partial<PluginLifecycleService>, schedule: () => void | Promise<void> = () => undefined): Promise<string> {
+  const api = new HostApi(new RegistryProvider(snapshot), lifecycle as PluginLifecycleService, { schedule })
+  const routes = api.routes()
+  const server = createServer((request, response) => {
+    const route = routes.find((candidate) => candidate.path === request.url)
+    void route!.handler(request, response)
+  })
+  servers.push(server)
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+}
+
+async function action(origin: string): Promise<Response> {
+  return fetch(`${origin}${API_PREFIX}/actions`, {
+    method: 'POST', headers: { origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'disable', id: 'github:example/tool' }),
+  })
+}
+
+const result = {
+  action: 'disable' as const, id: 'github:example/tool', packageName: 'example-tool',
+  state: 'inactive' as const, resolvedRef: 'example-tool@1.0.0', runtimeEffect: 'restart-required' as const,
+}
 
 describe('batched host restart', () => {
   it('queues plugin changes and restarts only on explicit request', async () => {
@@ -109,4 +137,53 @@ describe('batched host restart', () => {
     expect(response.status).toBe(409)
     expect(schedule).not.toHaveBeenCalled()
   })
+  it('blocks restart and simultaneous mutations while an operation is in flight', async () => {
+    let complete!: () => void
+    const gate = new Promise<void>((resolve) => { complete = resolve })
+    const perform = vi.fn<PluginLifecycleService['perform']>().mockResolvedValueOnce(result).mockImplementationOnce(async () => { await gate; return result })
+    const schedule = vi.fn()
+    const origin = await serve({ perform }, schedule)
+    expect((await action(origin)).status).toBe(200)
+    const pending = action(origin)
+    await vi.waitFor(() => expect(perform).toHaveBeenCalledTimes(2))
+    try {
+      expect((await action(origin)).status).toBe(409)
+      expect((await fetch(`${origin}${API_PREFIX}/restart`, { method: 'POST', headers: { origin } })).status).toBe(409)
+      expect(schedule).not.toHaveBeenCalled()
+    } finally { complete() }
+    expect((await pending).status).toBe(200)
+    expect((await fetch(`${origin}${API_PREFIX}/restart`, { method: 'POST', headers: { origin } })).status).toBe(202)
+    expect((await action(origin)).status).toBe(409)
+    expect((await fetch(`${origin}${API_PREFIX}/restart`, { method: 'POST', headers: { origin } })).status).toBe(409)
+    expect(schedule).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports restart launch failure and allows a retry', async () => {
+    const schedule = vi.fn().mockRejectedValueOnce(new Error('launch failed')).mockResolvedValueOnce(undefined)
+    const origin = await serve({ perform: async () => result }, schedule)
+    await action(origin)
+    const restart = () => fetch(`${origin}${API_PREFIX}/restart`, { method: 'POST', headers: { origin } })
+    expect((await restart()).status).toBe(500)
+    expect((await restart()).status).toBe(202)
+  })
+
+  it('rejects lookalike JSON types before executing a mutation', async () => {
+    const perform = vi.fn()
+    const origin = await serve({ perform })
+    const response = await fetch(`${origin}${API_PREFIX}/actions`, { method: 'POST', headers: { origin, 'content-type': 'application/jsonp' }, body: '{}' })
+    expect(response.status).toBe(415)
+    expect(perform).not.toHaveBeenCalled()
+  })
+
+  it('returns managed plugins even when they disappear from both catalog and profile dependencies', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-api-installed-'))
+    try {
+      await writeFile(join(root, 'package.json'), '{}')
+      await writeManagedState(root, { schemaVersion: 1, plugins: { removed: { id: 'npm:removed', packageName: 'removed', installRef: 'removed@1.0.0', installedAt: '2026-08-15T00:00:00.000Z' } } })
+      const origin = await serve({ profile: 'web', profileDir: root })
+      const response = await fetch(`${origin}${API_PREFIX}/installed`)
+      await expect(response.json()).resolves.toMatchObject({ plugins: [{ packageName: 'removed', managed: true, id: 'npm:removed', state: 'absent' }] })
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
 })

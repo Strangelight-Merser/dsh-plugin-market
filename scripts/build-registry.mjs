@@ -1,21 +1,25 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, rename } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { resolvePluginCategory } from '../src/core/category.ts'
+import { assertDshPluginManifest, PluginManifestError } from '../src/core/plugin-manifest.ts'
+import { parseInstallHint, RegistrySnapshotSchema } from '../src/core/registry.ts'
 
 const CURATED_URL = 'https://awesome-dsh-plugin.com/plugins.json'
 const GITHUB_SEARCH_URL = 'https://api.github.com/search/repositories'
-const OUTPUT = resolve('data/registry-v1.json')
+const OUTPUT = resolve(process.env.DSH_REGISTRY_OUTPUT ?? 'data/registry-v1.json')
 const VERIFIED_OVERRIDES = resolve('data/verified-overrides.json')
 const GITHUB_PAGES = Math.max(0, Math.min(10, Number.parseInt(process.env.DSH_GITHUB_PAGES ?? '10', 10)))
 const MAX_DESCRIPTION = 4000
-const packageNamePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
-const repositoryPathPattern = /^\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/
+
+class MissingManifestError extends Error {}
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(15_000) })
+  if (response.status === 404) throw new MissingManifestError(`${new URL(url).hostname} returned HTTP 404`)
   if (!response.ok) throw new Error(`${new URL(url).hostname} returned HTTP ${response.status}`)
-  return response.json()
+  try { return await response.json() }
+  catch { throw new PluginManifestError(`${new URL(url).hostname} returned invalid JSON`) }
 }
 
 function repositoryIdentity(url) {
@@ -51,37 +55,8 @@ function topicsOf(value) {
   return Array.isArray(value?.topics) ? value.topics.filter((topic) => typeof topic === 'string') : []
 }
 
-function installHintOf(value) {
-  if (typeof value !== 'string') return null
-  const prefix = 'dsh plugin --profile web add '
-  if (!value.startsWith(prefix)) return null
-  const locator = value.slice(prefix.length)
-  if (locator.startsWith('github:')) {
-    const [repository, fragment] = locator.slice('github:'.length).split('#')
-    if (!repositoryPattern.test(repository)) return null
-    if (fragment === undefined) return { kind: 'github', repository, path: null }
-    if (!fragment.startsWith('path:') || !repositoryPathPattern.test(fragment.slice('path:'.length))) return null
-    return { kind: 'github', repository, path: fragment.slice('path:'.length) }
-  }
-  return packageNamePattern.test(locator) ? { kind: 'npm', packageName: locator } : null
-}
-
 function hintKey(hint) {
   return hint.kind === 'npm' ? `npm:${hint.packageName}` : `github:${hint.repository}${hint.path ?? ''}`
-}
-
-function assertManifest(manifest, expectedName) {
-  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error('manifest is not an object')
-  if (typeof manifest.name !== 'string' || manifest.name.length === 0) throw new Error('manifest has no package name')
-  if (expectedName !== undefined && manifest.name !== expectedName) throw new Error(`package name mismatch for ${expectedName}`)
-  if (typeof manifest.dsh?.bundle?.patch !== 'string') throw new Error(`${manifest.name} has no dsh.bundle.patch`)
-  const root = manifest.exports?.['.']
-  const entrypoint = typeof manifest.main === 'string'
-    || typeof manifest.exports === 'string'
-    || typeof root === 'string'
-    || (root !== null && typeof root === 'object' && ['import', 'default', 'require'].some((key) => typeof root[key] === 'string'))
-  if (!entrypoint) throw new Error(`${manifest.name} has no host entrypoint`)
-  return manifest.name
 }
 
 async function validateHint(hint, checkedAt) {
@@ -91,7 +66,7 @@ async function validateHint(hint, checkedAt) {
     })
     const version = metadata?.['dist-tags']?.latest
     const manifest = typeof version === 'string' ? metadata?.versions?.[version] : null
-    const packageName = assertManifest(manifest, hint.packageName)
+    const packageName = assertDshPluginManifest(manifest, hint.packageName)
     return {
       validation: { manifest: 'pass', checkedAt, packageName },
       source: { kind: 'npm', packageName, version },
@@ -101,7 +76,7 @@ async function validateHint(hint, checkedAt) {
   const manifest = await fetchJson(`https://raw.githubusercontent.com/${hint.repository}/HEAD${hint.path ?? ''}/package.json`, {
     headers: { accept: 'application/json', 'user-agent': 'dsh-plugin-market-registry-builder' },
   })
-  const packageName = assertManifest(manifest)
+  const packageName = assertDshPluginManifest(manifest)
   return {
     validation: { manifest: 'pass', checkedAt, packageName },
     source: null,
@@ -135,7 +110,8 @@ async function githubTopic() {
     url.searchParams.set('per_page', '100')
     url.searchParams.set('page', String(page))
     const body = await fetchJson(url, { headers })
-    for (const item of body.items ?? []) entries.push(item)
+    if (!Array.isArray(body.items) || body.incomplete_results) throw new Error('GitHub search returned incomplete results')
+    for (const item of body.items) entries.push(item)
     if ((body.items ?? []).length < 100) break
   }
   return entries
@@ -152,8 +128,9 @@ async function validateAll(hints, checkedAt) {
       const [key, hint] = row
       try {
         results.set(key, await validateHint(hint, checkedAt))
-      } catch {
-        // A catalog build is fail-closed per locator. Other valid entries still ship.
+      } catch (error) {
+        if (!(error instanceof MissingManifestError || error instanceof PluginManifestError)) throw error
+        // Missing or invalid manifests are excluded; transport failures abort publication.
       }
     }
   }
@@ -163,16 +140,12 @@ async function validateAll(hints, checkedAt) {
 
 const checkedAt = new Date().toISOString()
 const curated = await fetchJson(CURATED_URL, { headers: { 'user-agent': 'dsh-plugin-market-registry-builder' } })
-let github = []
-try {
-  github = await githubTopic()
-} catch (error) {
-  process.stderr.write(`registry: GitHub topic source unavailable: ${String(error)}\n`)
-}
+if (!Array.isArray(curated.plugins) || curated.plugins.length === 0) throw new Error('curated catalog is empty or invalid')
+const github = await githubTopic()
 
 const hints = new Map()
 for (const plugin of curated.plugins ?? []) {
-  const hint = installHintOf(plugin.install)
+  const hint = parseInstallHint(plugin.install)
   if (hint !== null) hints.set(hintKey(hint), hint)
 }
 for (const item of github) {
@@ -188,7 +161,7 @@ const curatedRepos = new Set()
 
 for (const plugin of curated.plugins ?? []) {
   const identity = repositoryIdentity(String(plugin.url ?? ''))
-  const installHint = installHintOf(plugin.install)
+  const installHint = parseInstallHint(plugin.install)
   if (identity === null || installHint === null) continue
   const key = identity.toLowerCase()
   curatedRepos.add(key)
@@ -265,7 +238,8 @@ const entries = [...merged.values()].sort((left, right) => {
   if (left.status !== right.status) return priority[left.status] - priority[right.status]
   return (right.discovery.stars ?? -1) - (left.discovery.stars ?? -1) || left.name.localeCompare(right.name)
 })
-const snapshot = { schemaVersion: 1, generatedAt: checkedAt, entries }
+const snapshot = RegistrySnapshotSchema.parse({ schemaVersion: 1, generatedAt: checkedAt, entries })
+if (snapshot.entries.length === 0) throw new Error('refusing to publish an empty registry')
 try {
   const previous = JSON.parse(await readFile(OUTPUT, 'utf8'))
   const signature = (value) => JSON.stringify(value, (key, row) => key === 'checkedAt' ? undefined : row)
@@ -276,5 +250,7 @@ try {
 } catch {
   // A missing or invalid previous snapshot is replaced below.
 }
-await writeFile(OUTPUT, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8')
+const temporary = `${OUTPUT}.${process.pid}.tmp`
+await writeFile(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8')
+await rename(temporary, OUTPUT)
 process.stdout.write(`registry: wrote ${entries.length} validated entries; rejected ${hints.size - validations.size} of ${hints.size} unique locators (${curated.plugins?.length ?? 0} curated rows, ${github.length} GitHub topic rows)\n`)

@@ -137,7 +137,7 @@ beforeAll(async () => {
   const initialized = await bootstrap.run(['plugin', '--profile', 'web', 'install', '--ignore-scripts'])
   expect(initialized.code, initialized.stderr).toBe(0)
 
-  const fixtures = await Promise.all([packFixture('valid-plugin'), packFixture('invalid-plugin')])
+  const fixtures = await Promise.all([packFixture('valid-plugin'), packFixture('invalid-plugin'), packFixture('missing-artifact')])
   const registry = await startRegistry(fixtures)
   const snapshot: RegistrySnapshot = RegistrySnapshotSchema.parse({
     schemaVersion: 1,
@@ -145,6 +145,7 @@ beforeAll(async () => {
     entries: [
       communityEntry('npm:valid-fixture', 'Valid fixture', 'dsh-verified-fixture-plugin'),
       communityEntry('npm:invalid-fixture', 'Invalid fixture', 'dsh-verified-invalid-fixture'),
+      communityEntry('npm:missing-artifact', 'Missing artifact', 'dsh-missing-artifact-fixture'),
     ],
   })
   service = new PluginLifecycleService(
@@ -167,6 +168,14 @@ describe('real isolated DSH lifecycle', () => {
     await expect(service.preview('npm:invalid-fixture')).rejects.toThrow('no dsh.bundle.patch')
     expect(await profileMetadataHash()).toBe(before)
     await expect(access(join(profileDir, 'node_modules', 'dsh-verified-invalid-fixture'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('restores profile metadata and dependencies when installed artifacts are invalid', async () => {
+    const before = await profileMetadataHash()
+    const preview = await service.preview('npm:missing-artifact')
+    await expect(service.perform('install', 'npm:missing-artifact', preview.resolvedRef)).rejects.toThrow()
+    expect(await profileMetadataHash()).toBe(before)
+    await expect(access(join(profileDir, 'node_modules', 'dsh-missing-artifact-fixture'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('completes active-by-default install, disable-retain, re-enable, and uninstall', async () => {

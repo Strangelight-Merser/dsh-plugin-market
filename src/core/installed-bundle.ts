@@ -1,5 +1,6 @@
 import { realpath, readFile, stat } from 'node:fs/promises'
-import { isAbsolute, join, resolve, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
+import { assertDshPluginManifest, hostEntrypointOf, isSafeRelativePath, PluginManifestError } from './plugin-manifest.ts'
 
 const OPEN_SOURCE_LICENSES = new Set([
   '0BSD',
@@ -49,27 +50,6 @@ export class BundleValidationError extends Error {
   override readonly name = 'BundleValidationError'
 }
 
-function isSafeRelativePath(value: string): boolean {
-  if (value.length === 0 || value.includes('\0') || isAbsolute(value)) return false
-  return resolve('/', value) !== '/' && !value.split(/[\\/]/).includes('..')
-}
-
-function exportedEntrypoint(manifest: PackageManifest): string | null {
-  if (typeof manifest.main === 'string') return manifest.main
-  if (typeof manifest.exports === 'string') return manifest.exports
-  if (typeof manifest.exports === 'object' && manifest.exports !== null && !Array.isArray(manifest.exports)) {
-    const root = (manifest.exports as Record<string, unknown>)['.']
-    if (typeof root === 'string') return root
-    if (typeof root === 'object' && root !== null && !Array.isArray(root)) {
-      const conditions = root as Record<string, unknown>
-      for (const key of ['import', 'default', 'require']) {
-        if (typeof conditions[key] === 'string') return conditions[key]
-      }
-    }
-  }
-  return null
-}
-
 async function assertContainedFile(packageRoot: string, relativePath: string, label: string): Promise<string> {
   if (!isSafeRelativePath(relativePath)) throw new BundleValidationError(`${label} is not a safe relative path`)
   const realRoot = await realpath(packageRoot)
@@ -95,6 +75,13 @@ export async function inspectInstalledBundle(
     throw new BundleValidationError(`cannot read installed manifest: ${String(error)}`)
   }
 
+  try {
+    assertDshPluginManifest(manifest, expected.packageName)
+  } catch (error) {
+    if (error instanceof PluginManifestError) throw new BundleValidationError(error.message)
+    throw error
+  }
+
   if (manifest.name !== expected.packageName) throw new BundleValidationError('installed package name does not match the registry')
   const license = typeof manifest.license === 'string' ? manifest.license : null
   if (expected.strictLicense) {
@@ -106,7 +93,7 @@ export async function inspectInstalledBundle(
 
   const patch = manifest.dsh?.bundle?.patch
   if (typeof patch !== 'string') throw new BundleValidationError('installed package has no dsh.bundle.patch')
-  const entrypoint = exportedEntrypoint(manifest)
+  const entrypoint = hostEntrypointOf(manifest as Record<string, unknown>)
   if (entrypoint === null) throw new BundleValidationError('installed package has no host entrypoint')
 
   return {

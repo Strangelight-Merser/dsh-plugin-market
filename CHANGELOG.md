@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Propose scheduled registry changes through one reusable pull request, with an
+  explicit CI dispatch, instead of pushing to protected `main`.
+- Validate generated snapshots with the runtime schema; reject traversal,
+  duplicate IDs, malformed manifests, and inconsistent package identities.
+  Abort publication on network failures instead of dropping affected entries.
+- Serialize host mutations and restart requests, report helper launch failures,
+  and bound subprocess lifetime before rollback.
+- Match package export resolution and installed-artifact checks; require an
+  exact installation preview and preserve lifecycle-script suppression on removal.
+- Keep delisted plugins manageable, allow transient preview retries, and correct
+  refresh polling, stale-snapshot reporting, and dependency-state projection.
+- Clarify the difference between the published 0.5.0 package and the 0.6.x source.
+
+
 All notable changes are documented here. The project follows Semantic
 Versioning after its first public release.
 

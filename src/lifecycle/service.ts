@@ -129,7 +129,7 @@ export class PluginLifecycleService {
 
   async stateFor(packageName: string): Promise<PluginLifecycleState> {
     const manifest = await readProfileManifest(this.profileDir)
-    const managed = (await readManagedState(this.profileDir)).plugins[packageName] !== undefined
+    const managed = Object.hasOwn((await readManagedState(this.profileDir)).plugins, packageName)
     return lifecycleState(manifest, packageName, managed)
   }
 
@@ -191,11 +191,12 @@ export class PluginLifecycleService {
       throw error
     }
     const resolvedRef = installRef(resolved.source)
-    if (expectedRef !== undefined && resolvedRef !== expectedRef) {
+    if (expectedRef === undefined || resolvedRef !== expectedRef) {
       throw new LifecycleError('install source changed after preview; review it again')
     }
     const packageName = resolved.source.packageName
-    if (state.plugins[packageName] !== undefined) throw new LifecycleError(`${packageName} is already managed`)
+    if (Object.hasOwn(state.plugins, packageName)) throw new LifecycleError(`${packageName} is already managed`)
+    if (Object.values(state.plugins).some((plugin) => plugin.id === entry.id)) throw new LifecycleError(`${entry.id} is already managed`)
     const before = lifecycleState(await readProfileManifest(this.profileDir), packageName, false)
     if (before !== 'absent') throw new LifecycleError(`${packageName} is already present as ${before}`)
     const managed: ManagedPlugin = {
@@ -251,13 +252,18 @@ export class PluginLifecycleService {
   }
 
   private async uninstall(managed: ManagedPlugin, state: ManagedState): Promise<LifecycleResult> {
-    const before = await this.assertManagedState(managed, ['active', 'inactive'])
+    const before = await this.assertManagedState(managed, ['active', 'inactive', 'absent'])
+    if (before === 'absent') {
+      delete state.plugins[managed.packageName]
+      await writeManagedState(this.profileDir, state)
+      return { action: 'uninstall', id: managed.id, packageName: managed.packageName, state: 'absent', resolvedRef: managed.installRef, runtimeEffect: 'restart-required' }
+    }
     if (before !== 'active' && before !== 'inactive') throw new LifecycleError(`${managed.packageName} cannot be uninstalled from ${before}`)
     return this.mutate(
       'uninstall',
       managed,
       state,
-      ['plugin', '--profile', this.profile, 'remove', managed.packageName],
+      ['plugin', '--profile', this.profile, 'remove', '--config.ignore-scripts=true', managed.packageName],
       'absent',
       null,
       (next) => { delete next.plugins[managed.packageName] },

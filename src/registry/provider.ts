@@ -53,7 +53,8 @@ export class RegistryProvider {
   private readonly registryUrl: string
   private snapshot: RegistrySnapshot
   private refreshPromise: Promise<RegistryRefreshResult> | null = null
-  private timer: ReturnType<typeof setInterval> | null = null
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private running = false
   private refreshStatus: RegistryRefreshStatus
 
   constructor(snapshot: RegistrySnapshot, options: RegistryProviderOptions = {}) {
@@ -83,16 +84,15 @@ export class RegistryProvider {
   }
 
   start(): () => void {
-    if (this.timer !== null) return () => this.stop()
-    this.scheduleNext()
+    if (this.running) return () => this.stop()
+    this.running = true
     void this.refresh()
-    this.timer = setInterval(() => { void this.refresh() }, this.refreshIntervalMs)
-    this.timer.unref?.()
     return () => this.stop()
   }
 
   stop(): void {
-    if (this.timer !== null) clearInterval(this.timer)
+    this.running = false
+    if (this.timer !== null) clearTimeout(this.timer)
     this.timer = null
     this.refreshStatus = { ...this.refreshStatus, nextRefreshAt: null }
   }
@@ -104,10 +104,14 @@ export class RegistryProvider {
   }
 
   private scheduleNext(): void {
+    if (!this.running) return
+    if (this.timer !== null) clearTimeout(this.timer)
     this.refreshStatus = {
       ...this.refreshStatus,
       nextRefreshAt: new Date(this.now().getTime() + this.refreshIntervalMs).toISOString(),
     }
+    this.timer = setTimeout(() => { void this.refresh() }, this.refreshIntervalMs)
+    this.timer.unref?.()
   }
 
   private async performRefresh(): Promise<RegistryRefreshResult> {
@@ -120,7 +124,8 @@ export class RegistryProvider {
       })
       if (!response.ok) throw new Error(`${new URL(this.registryUrl).hostname} returned HTTP ${response.status}`)
       const next = normalizedSnapshot(await response.json())
-      if (Date.parse(next.generatedAt) >= Date.parse(this.snapshot.generatedAt)) this.snapshot = next
+      if (Date.parse(next.generatedAt) < Date.parse(this.snapshot.generatedAt)) throw new Error('published registry is older than the current snapshot')
+      this.snapshot = next
       this.refreshStatus = {
         ...this.refreshStatus,
         source: 'live',

@@ -14,11 +14,12 @@ export async function readProfileManifest(profileDir: string): Promise<ProfileMa
 }
 
 export function lifecycleState(manifest: ProfileManifest, packageName: string, managed: boolean): PluginLifecycleState {
-  const activeDependency = manifest.dependencies?.[packageName] !== undefined
-  const inactiveDependency = manifest.devDependencies?.[packageName] !== undefined
+  const activeDependency = Object.hasOwn(manifest.dependencies ?? {}, packageName)
+  const inactiveDependency = Object.hasOwn(manifest.devDependencies ?? {}, packageName)
   const inBundles = manifest.dsh?.profile?.bundles?.includes(packageName) ?? false
 
   if (!managed) return activeDependency || inactiveDependency || inBundles ? 'unmanaged' : 'absent'
+  if (activeDependency && inactiveDependency) return 'drifted'
   if (activeDependency && inBundles) return 'active'
   if (inactiveDependency && !inBundles) return 'inactive'
   if (!activeDependency && !inactiveDependency && !inBundles) return 'absent'

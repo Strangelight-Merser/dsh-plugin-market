@@ -1,0 +1,7 @@
+{
+  "name": "dsh-missing-artifact-fixture",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "dsh": { "bundle": { "patch": "./missing.yml" } }
+}

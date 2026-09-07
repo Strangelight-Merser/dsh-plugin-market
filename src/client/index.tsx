@@ -26,6 +26,7 @@ interface CatalogEntry {
   license: string | null
   installBlockReason: string | null
   source: { packageName: string } | null
+  validation?: { packageName: string }
   installHint: { kind: 'npm'; packageName: string } | { kind: 'github'; repository: string; path: string | null } | null
   discovery?: { stars: number | null; pushedAt: string | null }
   assessment: {
@@ -151,7 +152,7 @@ const styles = `
 `
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { accept: 'application/json', ...init?.headers } })
+  const response = await fetch(path, { signal: AbortSignal.timeout(120_000), ...init, headers: { accept: 'application/json', ...init?.headers } })
   const body = await response.json() as T & { error?: string }
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`)
   return body
@@ -166,7 +167,7 @@ async function waitForRuntimeRestart(previousInstanceId: string): Promise<boolea
   while (Date.now() < deadline) {
     await delay(400)
     try {
-      const catalog = await requestJson<CatalogResponse>(`${API_PREFIX}/catalog`, { cache: 'no-store' })
+      const catalog = await requestJson<CatalogResponse>(`${API_PREFIX}/catalog`, { cache: 'no-store', signal: AbortSignal.timeout(2_000) })
       if (catalog.runtimeInstanceId !== previousInstanceId) return true
     } catch {
       // The Web process is expected to be briefly unavailable during restart.
@@ -209,7 +210,6 @@ function MarketSection(): React.ReactElement {
   const [sortOrder, setSortOrder] = React.useState<CatalogSort>('stars')
   const [view, setView] = React.useState<'recommended' | 'market' | 'installed'>('recommended')
   const [limit, setLimit] = React.useState(PAGE_SIZE)
-  const [unavailable, setUnavailable] = React.useState<Set<string>>(() => new Set())
   const [confirmation, setConfirmation] = React.useState<{ entry: CatalogEntry; preview: LifecyclePreview } | null>(null)
 
   const reloadAll = React.useCallback(async (): Promise<void> => {
@@ -231,7 +231,7 @@ function MarketSection(): React.ReactElement {
     if (catalogResponse?.refresh.refreshing !== true) return undefined
     const timer = window.setTimeout(() => { reloadAll().catch((cause: unknown) => setError(String(cause))) }, 2_000)
     return () => window.clearTimeout(timer)
-  }, [catalogResponse?.refresh.refreshing, reloadAll])
+  }, [catalogResponse, reloadAll])
 
   React.useEffect(() => { setLimit(PAGE_SIZE) }, [query, categoryFilter, sortOrder, view])
   React.useEffect(() => {
@@ -311,7 +311,6 @@ function MarketSection(): React.ReactElement {
       })
       setConfirmation({ entry, preview })
     } catch (cause) {
-      setUnavailable((current) => new Set(current).add(entry.id))
       setError(`${entry.name} 暂时无法安装：${String(cause)}`)
     } finally {
       setPreviewing(null)
@@ -337,14 +336,14 @@ function MarketSection(): React.ReactElement {
   ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery))))
   const visibleCatalog = sortCatalog(filteredCatalog, sortOrder).slice(0, limit)
 
-  const renderActions = (entry: CatalogEntry, state: PluginState, managed: boolean): React.ReactNode => {
-    if (entry.installBlockReason !== null || unavailable.has(entry.id)) {
+  const renderActions = (entry: Pick<CatalogEntry, 'id' | 'name' | 'installBlockReason'>, state: PluginState, managed: boolean): React.ReactNode => {
+    if (!managed && state === 'absent' && entry.installBlockReason !== null) {
       return <button className="dpm-button" disabled type="button">不可安装</button>
     }
-    if (state === 'absent') return <button
+    if (state === 'absent' && !managed) return <button
       className="dpm-button dpm-button-primary"
-      disabled={busy !== null || previewing !== null}
-      onClick={() => { void beginInstall(entry) }}
+      disabled={busy !== null || previewing !== null || restartBusy}
+      onClick={() => { const candidate = catalogById.get(entry.id); if (candidate !== undefined) void beginInstall(candidate) }}
       type="button"
     >{previewing === entry.id ? '检查中…' : '安装'}</button>
     if (!managed) return null
@@ -352,13 +351,13 @@ function MarketSection(): React.ReactElement {
     return <div className="dpm-actions">
       {primary === null ? null : <button
         className={primary === 'enable' ? 'dpm-button dpm-button-primary' : 'dpm-button'}
-        disabled={busy !== null}
+        disabled={busy !== null || restartBusy}
         onClick={() => { void run(primary, entry.id) }}
         type="button"
       >{busy === `${entry.id}:${primary}` ? '处理中…' : actionLabel(primary)}</button>}
       <button
         className="dpm-button dpm-button-danger"
-        disabled={busy !== null}
+        disabled={busy !== null || restartBusy}
         onClick={() => { if (window.confirm(`卸载 ${entry.name}？`)) void run('uninstall', entry.id) }}
         type="button"
       >卸载</button>
@@ -412,7 +411,7 @@ function MarketSection(): React.ReactElement {
       </div>
       {visibleCatalog.length === 0 ? <div className="dpm-empty">{catalogResponse === null ? '正在加载…' : '没有找到插件'}</div> : <div className="dpm-list">
         {visibleCatalog.map((entry) => {
-          const knownPackageName = entry.source?.packageName ?? (entry.installHint?.kind === 'npm' ? entry.installHint.packageName : undefined)
+          const knownPackageName = entry.source?.packageName ?? entry.validation?.packageName ?? (entry.installHint?.kind === 'npm' ? entry.installHint.packageName : undefined)
           const current = installedById.get(entry.id) ?? (knownPackageName === undefined ? undefined : installedByPackage.get(knownPackageName))
           const state: PluginState = current?.state ?? 'absent'
           return <article className="dpm-card" key={entry.id}>
@@ -441,7 +440,7 @@ function MarketSection(): React.ReactElement {
                 <p>{entry.assessment.reasons.join(' · ') || '暂无正向证据'}{entry.assessment.cautions.length === 0 ? '' : `；注意：${entry.assessment.cautions.join(' · ')}`}</p>
               </details>
             </div>
-            <div className="dpm-actions">{renderActions(entry, state, current?.managed ?? false)}</div>
+            <div className="dpm-actions">{renderActions({ ...entry, id: current?.id ?? entry.id }, state, current?.managed ?? false)}</div>
           </article>
         })}
       </div>}
@@ -450,19 +449,19 @@ function MarketSection(): React.ReactElement {
       {managedInstalled.length === 0 ? <div className="dpm-empty">还没有通过市场安装插件</div> : <div className="dpm-list">
         {managedInstalled.map((plugin) => {
           const entry = plugin.id === null ? undefined : catalogById.get(plugin.id)
-          if (entry === undefined) return null
+          const actionEntry = entry ?? { id: plugin.id!, name: plugin.packageName, installBlockReason: 'plugin is no longer listed' }
           return <article className="dpm-card" key={plugin.packageName}>
             <div className="dpm-card-main">
               <div className="dpm-card-head">
-                <h3 className="dpm-card-title">{entry.name}</h3>
-                <span className="dpm-badge">{PLUGIN_CATEGORY_LABELS[entry.category]}</span>
+                <h3 className="dpm-card-title">{actionEntry.name}</h3>
+                <span className="dpm-badge">{entry === undefined ? '已下架' : PLUGIN_CATEGORY_LABELS[entry.category]}</span>
                 <span className={`dpm-badge ${plugin.state === 'active' ? 'dpm-badge-good' : plugin.state === 'drifted' ? 'dpm-badge-warn' : ''}`}>{stateLabel(plugin.state)}</span>
                 {plugin.id !== null && pendingRestart.has(plugin.id) ? <span className="dpm-badge dpm-badge-warn">待重启</span> : null}
               </div>
-              <p className="dpm-description">{entry.description.zh || entry.description.en || '暂无描述'}</p>
-              <div className="dpm-meta"><span>{plugin.packageName}</span><a className="dpm-source" href={entry.repositoryUrl} rel="noopener noreferrer" target="_blank">源码 ↗</a></div>
+              <p className="dpm-description">{entry === undefined ? '该插件已不在在线目录中，仍可停用或卸载。' : entry.description.zh || entry.description.en || '暂无描述'}</p>
+              <div className="dpm-meta"><span>{plugin.packageName}</span>{entry === undefined ? null : <a className="dpm-source" href={entry.repositoryUrl} rel="noopener noreferrer" target="_blank">源码 ↗</a>}</div>
             </div>
-            <div className="dpm-actions">{renderActions(entry, plugin.state, true)}</div>
+            <div className="dpm-actions">{renderActions(actionEntry, plugin.state, true)}</div>
           </article>
         })}
       </div>}
@@ -472,7 +471,7 @@ function MarketSection(): React.ReactElement {
       <div aria-labelledby="dpm-confirm-title" aria-modal="true" className="dpm-dialog" role="dialog">
         <div className="dpm-dialog-head">
           <div><h3 id="dpm-confirm-title">安装 {confirmation.entry.name}</h3><p className="dpm-dialog-subtitle">确认来源后将安装并默认启用。你可以继续操作其他插件，最后统一重启生效。</p></div>
-          <button aria-label="关闭" className="dpm-dialog-close" disabled={busy !== null} onClick={() => setConfirmation(null)} type="button">×</button>
+          <button aria-label="关闭" className="dpm-dialog-close" disabled={busy !== null || restartBusy} onClick={() => setConfirmation(null)} type="button">×</button>
         </div>
         <dl className="dpm-details">
           <div className="dpm-detail"><dt>包名</dt><dd>{confirmation.preview.packageName}</dd></div>
@@ -481,8 +480,8 @@ function MarketSection(): React.ReactElement {
         </dl>
         <div className="dpm-risk"><strong>第三方代码</strong>插件会以你的用户权限运行，可能读取本机文件、凭证并访问网络。请仅安装你信任的来源。</div>
         <div className="dpm-dialog-actions">
-          <button className="dpm-button dpm-button-quiet" disabled={busy !== null} onClick={() => setConfirmation(null)} type="button">取消</button>
-          <button autoFocus className="dpm-button dpm-button-primary" disabled={busy !== null} onClick={() => {
+          <button className="dpm-button dpm-button-quiet" disabled={busy !== null || restartBusy} onClick={() => setConfirmation(null)} type="button">取消</button>
+          <button autoFocus className="dpm-button dpm-button-primary" disabled={busy !== null || restartBusy} onClick={() => {
             void run('install', confirmation.entry.id, confirmation.preview.resolvedRef).then((success) => { if (success) setConfirmation(null) })
           }} type="button">{busy === `${confirmation.entry.id}:install` ? '安装中…' : '安装并启用'}</button>
         </div>

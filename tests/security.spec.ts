@@ -8,6 +8,10 @@ describe('host security gates', () => {
   it('requires an exact same-origin authority for mutation requests', () => {
     expect(isSameOrigin('http://127.0.0.1:3080', '127.0.0.1:3080')).toBe(true)
     expect(isSameOrigin('https://evil.example', '127.0.0.1:3080')).toBe(false)
+    expect(isSameOrigin('https://127.0.0.1:3080', '127.0.0.1:3080')).toBe(false)
+    expect(isSameOrigin('http://user@127.0.0.1:3080', '127.0.0.1:3080')).toBe(false)
+    expect(isSameOrigin('http://127.0.0.1:3080/path', '127.0.0.1:3080')).toBe(false)
+    expect(isSameOrigin('https://localhost:3080', 'localhost:3080', 'https:')).toBe(true)
     expect(isSameOrigin(undefined, '127.0.0.1:3080')).toBe(false)
     expect(isSameOrigin('not a URL', '127.0.0.1:3080')).toBe(false)
   })

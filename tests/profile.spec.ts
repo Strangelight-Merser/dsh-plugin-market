@@ -34,4 +34,9 @@ describe('profile lifecycle projection', () => {
       dsh: { profile: { bundles: ['in-box-bundle'] } },
     }), 'in-box-bundle', false)).toBe('unmanaged')
   })
+  it('does not treat inherited keys as installed packages and flags duplicate dependency roles', () => {
+    expect(lifecycleState({ dependencies: {} }, 'constructor', false)).toBe('absent')
+    expect(lifecycleState({ dependencies: { tool: '1.0.0' }, devDependencies: { tool: '1.0.0' }, dsh: { profile: { bundles: ['tool'] } } }, 'tool', true)).toBe('drifted')
+  })
+
 })
