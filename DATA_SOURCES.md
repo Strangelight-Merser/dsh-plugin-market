@@ -25,7 +25,9 @@ source catalog.
 
 GitHub metadata is refreshed within the service's published API limits. Search
 results can include unrelated repositories, so a Topic hit is never admitted by
-itself.
+itself. Previously admitted locations are rechecked on every build, even when
+they fall outside GitHub search's 1,000-result window. A missing search result
+alone does not remove a valid plugin.
 
 ## Admission check
 
