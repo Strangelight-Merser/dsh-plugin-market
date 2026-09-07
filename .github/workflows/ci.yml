@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Registry-only PRs are validated by explicit workflow_dispatch below.
+    # Avoid an approval-gated duplicate run on the synthetic merge commit.
+    paths-ignore:
+      - data/registry-v1.json
   workflow_dispatch:
 
 permissions:
