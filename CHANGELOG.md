@@ -6,7 +6,7 @@
   search window so search ranking changes do not falsely delist valid plugins.
 
 - Propose scheduled registry changes through one reusable pull request, with an
-  explicit CI dispatch, instead of pushing to protected `main`.
+  normal reviewed PR checks, instead of pushing to protected `main`.
 - Validate generated snapshots with the runtime schema; reject traversal,
   duplicate IDs, malformed manifests, and inconsistent package identities.
   Abort publication on network failures instead of dropping affected entries.

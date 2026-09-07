@@ -1,3 +1,4 @@
+import { isApprovedOpenSourceLicense } from './installed-bundle.ts'
 import type { RegistryEntry } from './registry.ts'
 
 export type AssessmentTier = 'strong' | 'promising' | 'listed' | 'excluded'
@@ -55,7 +56,7 @@ export function assessEntry(entry: RegistryEntry, reference = new Date()): Catal
   score += adoptionScore(stars)
   if (stars !== null && stars !== undefined && stars >= 25) reasons.push(`${stars} 个 GitHub 星标`)
 
-  if (entry.license === null) cautions.push('未识别到开源许可证')
+  if (entry.license === null || !isApprovedOpenSourceLicense(entry.license)) cautions.push('未识别到已确认的开源许可证')
   else {
     score += 10
     reasons.push(`许可证 ${entry.license}`)

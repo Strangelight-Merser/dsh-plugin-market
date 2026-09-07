@@ -4,11 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    # Registry-only PRs are validated by explicit workflow_dispatch below.
-    # Avoid an approval-gated duplicate run on the synthetic merge commit.
-    paths-ignore:
-      - data/registry-v1.json
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -61,7 +56,7 @@ jobs:
 
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -71,6 +66,3 @@ jobs:
 
       - name: Review dependency changes
         uses: actions/dependency-review-action@v5
-        with:
-          base-ref: ${{ github.event.pull_request.base.sha || 'main' }}
-          head-ref: ${{ github.event.pull_request.head.sha || github.sha }}
