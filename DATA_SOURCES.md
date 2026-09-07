@@ -25,7 +25,9 @@ source catalog.
 
 GitHub metadata is refreshed within the service's published API limits. Search
 results can include unrelated repositories, so a Topic hit is never admitted by
-itself.
+itself. Previously admitted locations are rechecked on every build, even when
+they fall outside GitHub search's 1,000-result window. A missing search result
+alone does not remove a valid plugin.
 
 ## Admission check
 
@@ -58,7 +60,9 @@ Repository maintainers must enable **Settings → Actions → General → Workfl
 permissions → Allow GitHub Actions to create and approve pull requests**.
 The workflow requests contents, pull-request, and Actions write permissions;
 it explicitly dispatches CI for the bot branch and does not bypass branch
-protection or automatically approve or merge the pull request. Installed markets fetch
+protection or automatically approve or merge the pull request. Registry-only PRs
+use the explicitly dispatched CI run; hand-authored registry-only PRs must also
+dispatch `CI` for their branch before merging. Installed markets fetch
 the published snapshot from this repository with one request on startup, every
 six hours, or when the user presses refresh. They keep the bundled snapshot if
 the request fails or the published copy is older. Individual plugin manifests

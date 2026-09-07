@@ -138,6 +138,13 @@ async function validateAll(hints, checkedAt) {
   return results
 }
 
+let previousSnapshot = null
+try {
+  previousSnapshot = RegistrySnapshotSchema.parse(JSON.parse(await readFile(resolve('data/registry-v1.json'), 'utf8')))
+} catch (error) {
+  if (error.code !== 'ENOENT' && !(error instanceof SyntaxError) && error.name !== 'ZodError') throw error
+}
+
 const checkedAt = new Date().toISOString()
 const curated = await fetchJson(CURATED_URL, { headers: { 'user-agent': 'dsh-plugin-market-registry-builder' } })
 if (!Array.isArray(curated.plugins) || curated.plugins.length === 0) throw new Error('curated catalog is empty or invalid')
@@ -152,6 +159,10 @@ for (const item of github) {
   if (isDirectoryRepository(item) || !repositoryPattern.test(String(item.full_name ?? ''))) continue
   const hint = { kind: 'github', repository: item.full_name, path: null }
   hints.set(hintKey(hint), hint)
+}
+// Search is capped at 1,000 results; absence from that window is not delisting.
+for (const entry of previousSnapshot?.entries ?? []) {
+  if (entry.status !== 'blocked' && entry.installHint !== null) hints.set(hintKey(entry.installHint), entry.installHint)
 }
 const validations = await validateAll(hints, checkedAt)
 
@@ -224,6 +235,23 @@ for (const item of github) {
       pushedAt: typeof item.pushed_at === 'string' ? item.pushed_at : null,
     },
   })
+}
+
+const currentLocators = new Set([...merged.values()].map((entry) => hintKey(entry.installHint)))
+for (const previous of previousSnapshot?.entries ?? []) {
+  if (merged.has(previous.id) || previous.status === 'blocked' || previous.installHint === null) continue
+  const key = hintKey(previous.installHint)
+  if (currentLocators.has(key)) continue
+  const validation = validations.get(key)
+  if (validation === undefined || validation.validation.packageName !== previous.validation?.packageName) continue
+  merged.set(previous.id, {
+    ...previous,
+    source: validation.source,
+    license: validation.license,
+    status: 'installable',
+    validation: validation.validation,
+  })
+  currentLocators.add(key)
 }
 
 const overrides = JSON.parse(await readFile(VERIFIED_OVERRIDES, 'utf8'))
