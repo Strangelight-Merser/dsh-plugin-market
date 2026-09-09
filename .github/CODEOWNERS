@@ -1,1 +1,5 @@
 * @Strangelight-Merser
+
+# Generated catalog updates do not need an automatic review request.
+# Code, workflows, and manually maintained data retain the owner above.
+/data/registry-v1.json
