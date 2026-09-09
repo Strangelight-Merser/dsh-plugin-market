@@ -52,6 +52,12 @@ repository's MIT license to the extent permitted by the source licenses.
 
 The repository rebuilds this snapshot every six hours and proposes changes in
 one reusable `automation/registry-refresh` pull request. The generated snapshot
+is compared with the existing proposal before pushing: unchanged catalog content
+and validation-time-only changes do not create another commit. Genuine catalog
+changes still update the proposal. Only `data/registry-v1.json` is excluded from
+automatic code-owner review requests; code, workflows, and manual data retain
+their owners. Existing PR subscriptions are separate GitHub notification settings.
+The generated snapshot
 must pass the same schema used by the client and the required CI checks before
 it is merged into `main`. Updates become available to users after that merge.
 Transport failures abort publication rather than silently dropping plugins.
