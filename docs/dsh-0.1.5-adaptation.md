@@ -36,7 +36,7 @@ Performed locally on macOS, Node 26.5.0, pnpm 11.5.1:
 | Real isolated lifecycle/Web contracts, DSH rc.1 | 4 passed |
 | Real isolated lifecycle/Web contracts, DSH rc.2 | 4 passed |
 | Production dependency audit | No known vulnerabilities |
-| Package inspection | 43 files; host/client/manifest/docs/registry bytes match local inputs |
+| Package inspection | 43 files; host/client/docs/registry bytes match; packaged manifest checked |
 
 Each contract run uses a temporary DSH_HOME. The lifecycle checks cover
 preview rejection, artifact-failure rollback, installation, disable-retain,
@@ -65,6 +65,9 @@ The user's normal Web profile was not used for these tests.
 `dsh-plugin-market-0.7.0.tgz`
 
 SHA-256: `35c5d767f127c63c3e92a7add520cc6e07c5f6ec64a587f0d488b6577c4c8d28`
+
+pnpm removes `packageManager` and the `prepack` script from the packed
+manifest. All remaining manifest fields match the source package.json.
 
 Install from the project directory:
 
