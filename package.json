@@ -63,7 +63,7 @@
     }
   },
   "dependencies": {
-    "zod": "^4.1.12"
+    "zod": "^4.6.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
