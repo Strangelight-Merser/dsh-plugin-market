@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-market",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "A small, open plugin market for DeepSeek Harness",
   "type": "module",
@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.host.json --noEmit --pretty false && tsc -p tsconfig.client.json --noEmit --pretty false && tsc -p tsconfig.test.json --noEmit --pretty false",
     "test": "vitest run --reporter=verbose",
-    "test:contract": "vitest run --config vitest.contract.config.ts --reporter=verbose",
+    "test:contract": "pnpm run build && vitest run --config vitest.contract.config.ts --reporter=verbose",
     "registry:refresh": "node scripts/build-registry.mjs",
     "build:host": "tsdown --config tsdown.host.config.ts",
     "build:client": "tsdown --config tsdown.client.config.ts",
@@ -55,7 +55,7 @@
   "author": "Strangelight-Merser",
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1"
+    "@deepseek-ai/cordis": "^4.0.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -66,7 +66,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis": "^4.0.2",
     "@types/node": "^26.2.0",
     "@types/react": "~18.3.1",
     "react": "^18.3.1",
@@ -81,9 +81,8 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings-general"
       ]
     }
   }

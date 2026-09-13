@@ -9,7 +9,8 @@ import {
   installBlockReason,
   installRef,
   RegistrySnapshotSchema,
-  SUPPORTED_DSH_VERSION,
+  SUPPORTED_DSH_VERSIONS,
+  isSupportedDshVersion,
   type RegistryEntry,
   type RegistrySnapshot,
 } from '../core/registry.ts'
@@ -122,8 +123,8 @@ export class PluginLifecycleService {
   async assertSupportedRuntime(): Promise<void> {
     const result = await this.runner.run(['--version'])
     if (result.code !== 0) throw commandFailure(['--version'], result)
-    if (result.stdout.trim() !== SUPPORTED_DSH_VERSION) {
-      throw new LifecycleError(`unsupported DSH ${JSON.stringify(result.stdout.trim())}; expected ${SUPPORTED_DSH_VERSION}`)
+    if (!isSupportedDshVersion(result.stdout.trim())) {
+      throw new LifecycleError(`unsupported DSH ${JSON.stringify(result.stdout.trim())}; expected ${SUPPORTED_DSH_VERSIONS.join(' or ')}`)
     }
   }
 

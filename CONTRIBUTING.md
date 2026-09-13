@@ -19,8 +19,8 @@ Thanks for helping keep DSH Plugin Market small, useful, and trustworthy.
 
 5. Explain the user-visible change and the validation you ran.
 
-The contract tests require DSH `0.1.0-rc.6` on `PATH` and use a disposable
-`DSH_HOME`.
+The contract tests require DSH `0.1.5-rc.1` or `0.1.5-rc.2` on `PATH` and
+use a disposable `DSH_HOME`. CI runs both versions on Linux and macOS.
 
 ## Adding plugins
 

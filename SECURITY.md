@@ -2,8 +2,8 @@
 
 ## Supported version
 
-Security fixes are provided for the latest release. The current development
-line is `0.6.x` and supports exactly DSH `0.1.0-rc.6`.
+Security fixes are provided for the latest release. The current release line
+is `0.7.x` and supports DSH `0.1.5-rc.1` and `0.1.5-rc.2`.
 
 ## Reporting a vulnerability
 
@@ -16,7 +16,8 @@ mitigation. You should receive an acknowledgement within seven days.
 
 The market reduces accidental and supply-chain risk; it is not a sandbox.
 
-- State-changing HTTP requests require the exact page origin. Preview and
+- Every market HTTP route uses the host Connection's browser authentication
+  and Host/Origin checks. State-changing requests also require the exact page origin. Preview and
   lifecycle requests additionally require JSON input.
 - Installation uses argument arrays, not shell command strings.
 - npm versions and GitHub commits are resolved exactly and shown before the

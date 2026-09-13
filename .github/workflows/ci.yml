@@ -33,20 +33,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install supported DSH CLI
-        run: npm install --global @deepseek-ai/dsh@0.1.0-rc.6
-
       - name: Type-check
         run: pnpm typecheck
 
       - name: Run unit tests
         run: pnpm test
 
-      - name: Run real DSH contract tests
-        run: pnpm test:contract
-
       - name: Build package
         run: pnpm build
+
+      - name: Run real DSH contract tests for each supported CLI
+        run: |
+          for version in $(node --input-type=module -e 'import { SUPPORTED_DSH_VERSIONS } from "./src/core/registry.ts"; console.log(SUPPORTED_DSH_VERSIONS.join(" "))'); do
+            npm install --global "@deepseek-ai/dsh@$version"
+            pnpm exec vitest run --config vitest.contract.config.ts --reporter=verbose
+          done
 
       - name: Audit production dependencies
         run: pnpm audit --prod

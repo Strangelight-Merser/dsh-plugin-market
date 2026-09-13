@@ -8,7 +8,7 @@ import {
   parseInstallHint,
   RegistryEntrySchema,
   RegistrySnapshotSchema,
-  SUPPORTED_DSH_VERSION,
+  SUPPORTED_DSH_VERSIONS,
 } from '../src/core/registry.ts'
 
 const verified = RegistryEntrySchema.parse({
@@ -22,7 +22,7 @@ const verified = RegistryEntrySchema.parse({
   installHint: { kind: 'npm', packageName: 'dsh-example' },
   status: 'verified',
   evidence: {
-    dshVersion: SUPPORTED_DSH_VERSION,
+    dshVersion: SUPPORTED_DSH_VERSIONS[0],
     checkedAt: '2026-08-15T00:00:00.000Z',
     platform: 'darwin',
     manifest: 'pass',
@@ -48,7 +48,7 @@ describe('registry trust boundary', () => {
     expect(new Set(snapshot.entries.map((entry) => entry.id)).size).toBe(snapshot.entries.length)
     expect(snapshot.entries.some((entry) => entry.status === 'installable')).toBe(true)
     expect(snapshot.entries.every((entry) => entry.status === 'blocked' || entry.validation?.manifest === 'pass')).toBe(true)
-    expect(snapshot.entries.every((entry) => installBlockReason(entry) === null)).toBe(true)
+    expect(snapshot.entries.filter((entry) => entry.status === 'installable').every((entry) => installBlockReason(entry) === null)).toBe(true)
     const monorepoEntries = snapshot.entries.filter((entry) => entry.installHint?.kind === 'github' && entry.installHint.path !== null)
     expect(monorepoEntries.length).toBeGreaterThan(0)
     expect(monorepoEntries.every((entry) => entry.installHint?.kind === 'github' && entry.installHint.path?.startsWith('/') === true)).toBe(true)
@@ -83,6 +83,19 @@ describe('registry trust boundary', () => {
       commit: 'b'.repeat(40),
       path: '/packages/ui',
     })).toBe(`github:example/dsh-example#${'b'.repeat(40)}&path:/packages/ui`)
+  })
+
+  it('retains historical evidence without treating it as support for the current runtime', () => {
+    const historical = RegistryEntrySchema.parse({
+      ...verified,
+      evidence: { ...verified.evidence, dshVersion: '0.1.0-rc.6' },
+    })
+    expect(historical.evidence?.dshVersion).toBe('0.1.0-rc.6')
+    expect(installBlockReason(historical)).toContain('unsupported DSH version')
+    for (const dshVersion of SUPPORTED_DSH_VERSIONS) {
+      expect(installBlockReason(RegistryEntrySchema.parse({ ...verified, evidence: { ...verified.evidence, dshVersion } }))).toBeNull()
+    }
+    expect(() => RegistryEntrySchema.parse({ ...verified, evidence: { ...verified.evidence, dshVersion: 'latest' } })).toThrow()
   })
 
   it('rejects command-shaped package metadata', () => {

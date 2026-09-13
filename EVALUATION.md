@@ -22,7 +22,7 @@
 
 | 项目 | 推荐理由 | 主要注意事项 |
 |---|---|---|
-| [dsh-find-plugin](https://github.com/awesome-dsh-plugin/dsh-find-plugin) | 会话内按需求搜索插件，最适合作为生态入口 | 本项目的真实运行验证目前仅覆盖 macOS + DSH rc.6 |
+| [dsh-find-plugin](https://github.com/awesome-dsh-plugin/dsh-find-plugin) | 会话内按需求搜索插件，最适合作为生态入口 | 历史验证仅覆盖 macOS + DSH 0.1.0-rc.6；尚未在当前支持版本复验，市场暂不允许安装该固定来源 |
 | [dsh-skill-viewer](https://github.com/Fishquito7/dsh-skill-viewer) | 在 Web 设置中集中管理 Skills，操作路径短 | 仅完成清单检查，未做运行时安全审查 |
 | [dsh-context](https://github.com/bowenliang123/dsh-context) | 直观看到上下文组成、压缩和 token 变化 | 统计准确性可能受 DSH 版本变化影响 |
 | [dsh-vision-router](https://github.com/ysr666/dsh-vision-router) | 为文本 Agent 增加图片问答、OCR 与像素工具 | 默认视觉链使用第三方匿名端点，不应用于敏感图片 |
