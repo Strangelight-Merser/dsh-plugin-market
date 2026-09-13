@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { readManagedState } from '../src/core/managed-state.ts'
 import { readProfileManifest } from '../src/core/profile.ts'
-import { RegistrySnapshotSchema, type RegistrySnapshot } from '../src/core/registry.ts'
+import { RegistrySnapshotSchema, SUPPORTED_DSH_VERSIONS, type RegistrySnapshot } from '../src/core/registry.ts'
 import { SpawnDshRunner } from '../src/lifecycle/runner.ts'
 import { PluginLifecycleService } from '../src/lifecycle/service.ts'
 import { NetworkInstallSourceResolver } from '../src/lifecycle/source-resolver.ts'
@@ -30,6 +30,8 @@ let dshHome: string
 let profileDir: string
 let registryServer: Server
 let service: PluginLifecycleService
+let registryUrl: string
+let web: ChildProcess | undefined
 
 async function packFixture(directory: string): Promise<PackedFixture> {
   const fixtureDir = join(here, '..', 'fixtures', directory)
@@ -62,6 +64,12 @@ async function startRegistry(fixtures: readonly PackedFixture[]): Promise<{ url:
     }
 
     const name = decodeURIComponent(requestUrl.pathname.slice(1))
+    // The real packed market retains its production dependency. Only the
+    // fixture packages are served locally; resolve zod from its official registry.
+    if (name === 'zod') {
+      response.writeHead(302, { location: 'https://registry.npmjs.org/zod' }).end()
+      return
+    }
     const fixture = byName.get(name)
     if (fixture === undefined) {
       response.writeHead(404).end()
@@ -139,6 +147,7 @@ beforeAll(async () => {
 
   const fixtures = await Promise.all([packFixture('valid-plugin'), packFixture('invalid-plugin'), packFixture('missing-artifact')])
   const registry = await startRegistry(fixtures)
+  registryUrl = registry.url
   const snapshot: RegistrySnapshot = RegistrySnapshotSchema.parse({
     schemaVersion: 1,
     generatedAt: '2026-08-15T00:00:00.000Z',
@@ -158,6 +167,23 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  // The restart helper deliberately detaches its replacement. The fixture
+  // records that PID so cleanup owns both generations, including on failure.
+  let replacementPid: number | undefined
+  if (root !== undefined) {
+    try { replacementPid = Number(await readFile(join(root, 'runtime-pid'), 'utf8')) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  }
+  for (const pid of new Set([web?.pid, replacementPid])) {
+    if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) continue
+    try { process.kill(pid, 'SIGTERM') }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+    await vi.waitFor(() => {
+      try { process.kill(pid, 0) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return; throw error }
+      throw new Error(`DSH process ${pid} is still stopping`)
+    }, { timeout: 30_000, interval: 100 })
+  }
   if (registryServer !== undefined) await new Promise<void>((resolve, reject) => registryServer.close((error) => error === undefined ? resolve() : reject(error)))
   if (root !== undefined) await rm(root, { recursive: true, force: true })
 })
@@ -173,7 +199,7 @@ describe('real isolated DSH lifecycle', () => {
   it('restores profile metadata and dependencies when installed artifacts are invalid', async () => {
     const before = await profileMetadataHash()
     const preview = await service.preview('npm:missing-artifact')
-    await expect(service.perform('install', 'npm:missing-artifact', preview.resolvedRef)).rejects.toThrow()
+    await expect(service.perform('install', 'npm:missing-artifact', preview.resolvedRef)).rejects.toThrow(/artifact|patch|entry|bundle/i)
     expect(await profileMetadataHash()).toBe(before)
     await expect(access(join(profileDir, 'node_modules', 'dsh-missing-artifact-fixture'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -212,5 +238,86 @@ describe('real isolated DSH lifecycle', () => {
     expect(uninstalled.state).toBe('absent')
     expect((await readManagedState(profileDir)).plugins).toEqual({})
     await expect(access(join(profileDir, 'node_modules', 'dsh-verified-fixture-plugin'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('boots the packed market behind DSH authentication and applies a batch with one real restart', async () => {
+    const projectDir = join(here, '..')
+    const packed = await execFileAsync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', root], { cwd: projectDir })
+    const [{ filename }] = JSON.parse(packed.stdout) as [{ filename: string }]
+    const installed = await new SpawnDshRunner(dshHome).run(['plugin', '--profile', 'web', 'add', '--ignore-scripts', join(root, filename)])
+    expect(installed.code, installed.stderr).toBe(0)
+    const preview = await service.preview('npm:valid-fixture')
+    await service.perform('install', preview.id, preview.resolvedRef)
+
+    const portProbe = createServer()
+    await new Promise<void>((resolve) => portProbe.listen(0, '127.0.0.1', resolve))
+    const address = portProbe.address()
+    if (address === null || typeof address === 'string') throw new Error('no available TCP port')
+    await new Promise<void>((resolve, reject) => portProbe.close((error) => error ? reject(error) : resolve()))
+    const baseUrl = `http://127.0.0.1:${address.port}`
+    let log = ''
+    let spawnError: Error | undefined
+    web = spawn('dsh', ['web', '--no-open', '--port', String(address.port)], {
+      cwd: root,
+      env: { ...process.env, DSH_HOME: dshHome, DSH_TELEMETRY_DISABLED: '1', PNPM_CONFIG_REGISTRY: registryUrl, DSH_MARKET_FIXTURE_RUNTIME_FILE: join(root, 'runtime-pid') },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    web.on('error', (error) => { spawnError = error })
+    web.stdout!.on('data', (chunk: Buffer) => { log += chunk.toString() })
+    web.stderr!.on('data', (chunk: Buffer) => { log += chunk.toString() })
+    await vi.waitFor(() => {
+      if (spawnError !== undefined) throw spawnError
+      expect(log, log).toContain(`${baseUrl}/?token=`)
+    }, { timeout: 30_000, interval: 100 })
+
+    for (const path of ['catalog', 'installed', 'registry/refresh', 'preview', 'actions', 'restart']) {
+      const method = ['catalog', 'installed'].includes(path) ? 'GET' : 'POST'
+      expect((await fetch(`${baseUrl}/api/dsh-market/v1/${path}`, { method })).status, path).toBe(401)
+    }
+    const loginUrl = log.match(/http:\/\/127\.0\.0\.1:\d+\/\?token=\S+/)![0]
+    const login = await fetch(loginUrl, { redirect: 'manual' })
+    expect(login.status).toBe(303)
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!
+    expect((await fetch(`${baseUrl}/api/dsh-market/v1/catalog`, { headers: { cookie, origin: 'https://evil.example' } })).status).toBe(403)
+    const request = (path: string, body?: unknown) => fetch(`${baseUrl}${path}`, {
+      headers: { cookie, origin: baseUrl, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    const catalog = async (): Promise<{ runtimeInstanceId: string; pendingRestartIds: string[]; supportedDshVersions: string[] }> => {
+      const response = await request('/api/dsh-market/v1/catalog')
+      expect(response.status).toBe(200)
+      return response.json()
+    }
+
+    const html = await (await request('/')).text()
+    const boot = JSON.parse(html.match(/globalThis\["__DSH_BOOT__"\] = (.*?)<\/script>/s)![1]!) as { entries: Array<{ id: string; url: string; inject: string[] }> }
+    const market = boot.entries.find((entry) => entry.id === 'dsh-plugin-market')!
+    expect(market).toBeDefined()
+    for (const dependency of market.inject) expect(boot.entries.some((entry) => entry.id === dependency), `missing client dependency ${dependency}`).toBe(true)
+    const client = await request(market.url)
+    expect(client.status).toBe(200)
+    expect(await client.text()).toContain('settings.section')
+
+    const before = await catalog()
+    expect(before.supportedDshVersions).toEqual(SUPPORTED_DSH_VERSIONS)
+    const runningPid = (await (await request('/api/dsh-market-fixture')).json() as { pid: number }).pid
+    for (const action of ['disable', 'enable']) {
+      const response = await request('/api/dsh-market/v1/actions', { action, id: preview.id })
+      expect(response.status, await response.clone().text()).toBe(200)
+      expect((await catalog()).runtimeInstanceId).toBe(before.runtimeInstanceId)
+      expect(await (await request('/api/dsh-market-fixture')).json()).toEqual({ pid: runningPid })
+    }
+    expect((await catalog()).pendingRestartIds).toEqual([preview.id])
+    const restart = await request('/api/dsh-market/v1/restart', {})
+    expect(restart.status, await restart.clone().text()).toBe(202)
+    await vi.waitFor(async () => {
+      const current = await catalog()
+      expect(current.runtimeInstanceId).not.toBe(before.runtimeInstanceId)
+      expect(current.pendingRestartIds).toEqual([])
+    }, { timeout: 45_000, interval: 250 })
+    expect((await (await request('/api/dsh-market-fixture')).json() as { pid: number }).pid).not.toBe(runningPid)
+    expect((await readProfileManifest(profileDir)).dsh?.profile?.bundles).toContain('dsh-verified-fixture-plugin')
+    expect((await request('/api/dsh-market/v1/restart', {})).status).toBe(409)
   })
 })

@@ -1,42 +1,48 @@
 # Changelog
 
-## Unreleased
-
-- Retain and revalidate historical plugin locations outside GitHub's capped
-  search window so search ranking changes do not falsely delist valid plugins.
-
-- Propose scheduled registry changes through one reusable pull request, with an
-  normal reviewed PR checks, instead of pushing to protected `main`.
-- Validate generated snapshots with the runtime schema; reject traversal,
-  duplicate IDs, malformed manifests, and inconsistent package identities.
-  Abort publication on network failures instead of dropping affected entries.
-- Serialize host mutations and restart requests, report helper launch failures,
-  and bound subprocess lifetime before rollback.
-- Match package export resolution and installed-artifact checks; require an
-  exact installation preview and preserve lifecycle-script suppression on removal.
-- Keep delisted plugins manageable, allow transient preview retries, and correct
-  refresh polling, stale-snapshot reporting, and dependency-state projection.
-- Clarify the difference between the published 0.5.0 package and the 0.6.x source.
-
-
 All notable changes are documented here. The project follows Semantic
 Versioning after its first public release.
 
-## [Unreleased]
+## [0.7.0] - 2026-09-13
 
 ### Added
 
-- Functional categories with compact filtering and per-category counts.
-- Automatic category inference for GitHub discoveries from names,
-  descriptions, and repository topics.
-- Automatic DSH Web restart and page recovery after a successful plugin
-  installation.
+- Support for DSH 0.1.5-rc.1 and 0.1.5-rc.2, with Cordis 4.0.2 and the
+  current client renderer/settings shell dependencies.
+- Functional categories with per-category counts and category inference for
+  GitHub discoveries, plus explicit online refresh status.
+- Batch plugin changes and apply them with one explicit DSH Web restart;
+  recover the page after restart while retaining browser authentication.
+- Real packed-plugin contract tests for Web boot, authentication, and process
+  restart, run against both supported CLIs on Linux and macOS in CI.
 
 ### Changed
 
-- Removed verification labels from the market UI; catalog admission remains a
+- Remove the retired client-runtime dependency and replace the old single
+  supported-version gate with the two tested DSH versions.
+- Preserve the original versions in historical catalog evidence. Older
+  evidence cannot authorize installation or earn current runtime credit.
+- Retain and revalidate historical plugin locations outside GitHub's capped
+  search window; compare scheduled refreshes with the existing automation PR
+  as well as main to avoid duplicate timestamp-only commits.
+- Keep delisted managed plugins available for disable and uninstall; allow
+  transient preview retries and correct refresh polling and state reporting.
+- Remove verification labels from the market UI; catalog admission remains a
   structural filter rather than a security or continuous runtime guarantee.
-- Made online catalog refresh status explicit in the market header.
+
+### Security and reliability
+
+- Protect all market HTTP routes with the host Connection's browser login
+  and Host/Origin checks, in addition to exact same-origin mutation checks.
+- Validate generated snapshots and installed artifacts; reject unsafe paths,
+  duplicate IDs, malformed manifests, and inconsistent package identities.
+- Abort registry publication on transport failures instead of dropping entries.
+- Serialize mutations and restart requests; report restart-launch failures and
+  bound subprocess lifetime before rollback.
+- Require the exact previewed source and keep dependency scripts disabled on
+  installation and removal. Restore metadata after failed artifact validation.
+- Publish registry changes through one reusable reviewed PR without weakening
+  the normal code-review requirements.
 
 ## [0.5.0] - 2026-08-15
 

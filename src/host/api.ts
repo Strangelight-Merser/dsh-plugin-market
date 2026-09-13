@@ -7,7 +7,7 @@ import { assessEntry } from '../core/assessment.ts'
 import { readManagedState } from '../core/managed-state.ts'
 import { lifecycleState, readProfileManifest } from '../core/profile.ts'
 import { ProfileLockedError } from '../core/profile-lock.ts'
-import { installBlockReason, RegistrySnapshotSchema, SUPPORTED_DSH_VERSION, type RegistrySnapshot } from '../core/registry.ts'
+import { installBlockReason, RegistrySnapshotSchema, SUPPORTED_DSH_VERSIONS, type RegistrySnapshot } from '../core/registry.ts'
 import { LifecycleError, PluginLifecycleService, type LifecycleAction } from '../lifecycle/service.ts'
 import { RegistryProvider } from '../registry/provider.ts'
 import { DetachedRuntimeRestarter, type RuntimeRestarter } from './runtime-restart.ts'
@@ -43,6 +43,10 @@ export interface WebServerService {
   register(route: WebRoute): () => void
 }
 
+export interface WebConnectionService {
+  requestRejection(request: Pick<IncomingMessage, 'headers'>): 401 | 403 | undefined
+}
+
 interface JsonResponse {
   status: number
   body: unknown
@@ -57,6 +61,20 @@ function respond(response: ServerResponse, result: JsonResponse, head = false): 
     'x-content-type-options': 'nosniff',
   })
   response.end(head ? undefined : body)
+}
+
+export function authenticatedRoute(route: WebRoute, connection: WebConnectionService): WebRoute {
+  return {
+    ...route,
+    handler: (request, response) => {
+      const status = connection.requestRejection(request)
+      if (status !== undefined) {
+        respond(response, { status, body: { error: status === 401 ? 'DSH browser login required' : 'DSH browser trust check failed' } }, request.method === 'HEAD')
+        return
+      }
+      return route.handler(request, response)
+    },
+  }
 }
 
 export function isSameOrigin(origin: string | undefined, host: string | undefined, protocol = 'http:'): boolean {
@@ -137,7 +155,7 @@ export class HostApi {
         generatedAt: snapshot.generatedAt,
         runtimeInstanceId: this.runtimeInstanceId,
         pendingRestartIds: [...this.pendingRestartIds],
-        supportedDshVersion: SUPPORTED_DSH_VERSION,
+        supportedDshVersions: SUPPORTED_DSH_VERSIONS,
         refresh: this.registry.status(),
         lifecycle: {
           installDefault: 'active',
@@ -149,7 +167,7 @@ export class HostApi {
           },
           hotSwap: {
             supported: false,
-            reason: 'DSH rc.6 caches client package metadata; arbitrary plugin-set changes require a DSH Web restart.',
+            reason: 'Plugin dependency and profile bundle changes require a DSH Web restart to rebuild the host and client module graphs.',
           },
         },
         evaluation: {

@@ -1,16 +1,17 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { HostApi, loadBundledRegistry, type WebServerService } from './host/api.ts'
+import { authenticatedRoute, HostApi, loadBundledRegistry, type WebConnectionService, type WebServerService } from './host/api.ts'
 import { PluginLifecycleService } from './lifecycle/service.ts'
 import { RegistryProvider } from './registry/provider.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     webServer: WebServerService
+    connection: WebConnectionService
   }
 }
 
 export const name = 'dsh-plugin-market'
-export const inject = ['webServer']
+export const inject = ['webServer', 'connection']
 
 export function apply(ctx: Context): void {
   const snapshot = loadBundledRegistry()
@@ -19,7 +20,7 @@ export function apply(ctx: Context): void {
   const api = new HostApi(registry, lifecycle)
   ctx.effect(() => registry.start(), 'dsh-plugin-market: periodic registry refresh')
   for (const route of api.routes()) {
-    ctx.effect(() => ctx.webServer.register(route), `dsh-plugin-market: ${route.path}`)
+    ctx.effect(() => ctx.webServer.register(authenticatedRoute(route, ctx.connection)), `dsh-plugin-market: ${route.path}`)
   }
 }
 

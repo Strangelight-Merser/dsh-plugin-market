@@ -1,5 +1,5 @@
 import { isApprovedOpenSourceLicense } from './installed-bundle.ts'
-import type { RegistryEntry } from './registry.ts'
+import { isSupportedDshVersion, type RegistryEntry } from './registry.ts'
 
 export type AssessmentTier = 'strong' | 'promising' | 'listed' | 'excluded'
 
@@ -42,8 +42,10 @@ export function assessEntry(entry: RegistryEntry, reference = new Date()): Catal
 
   const reasons: string[] = []
   const cautions: string[] = []
-  let score = entry.status === 'verified' ? 40 : 30
-  reasons.push(entry.status === 'verified' ? '已完成 DSH 运行验证' : '已确认原生 DSH 插件清单')
+  const verified = entry.status === 'verified' && isSupportedDshVersion(entry.evidence?.dshVersion ?? '')
+  let score = verified ? 40 : 30
+  reasons.push(verified ? `已在 DSH ${entry.evidence!.dshVersion} 完成运行验证` : '已确认原生 DSH 插件清单')
+  if (entry.evidence !== undefined && !verified) cautions.push(`运行验证仅覆盖 DSH ${entry.evidence.dshVersion}，未覆盖当前支持版本`)
 
   if (entry.description.zh.trim().length > 0 || entry.description.en.trim().length > 0) score += 10
   const days = ageDays(entry.discovery?.pushedAt, reference)
@@ -61,9 +63,9 @@ export function assessEntry(entry: RegistryEntry, reference = new Date()): Catal
     score += 10
     reasons.push(`许可证 ${entry.license}`)
   }
-  if (entry.status !== 'verified') cautions.push('尚未进行运行时安全审查')
+  if (!verified) cautions.push('尚未进行运行时安全审查')
 
-  const tier: AssessmentTier = entry.status === 'verified' || score >= 75
+  const tier: AssessmentTier = verified || score >= 75
     ? 'strong'
     : score >= 60 ? 'promising' : 'listed'
   return { score, tier, reasons, cautions }

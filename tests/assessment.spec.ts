@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { assessEntry } from '../src/core/assessment.ts'
-import { RegistryEntrySchema, SUPPORTED_DSH_VERSION } from '../src/core/registry.ts'
+import { RegistryEntrySchema, SUPPORTED_DSH_VERSIONS } from '../src/core/registry.ts'
 
 const reference = new Date('2026-08-15T00:00:00.000Z')
 
@@ -36,7 +36,7 @@ describe('catalog assessment', () => {
       status: 'verified',
       source: { kind: 'npm', packageName: 'dsh-tool', version: '1.0.0' },
       evidence: {
-        dshVersion: SUPPORTED_DSH_VERSION,
+        dshVersion: SUPPORTED_DSH_VERSIONS[0],
         checkedAt: reference.toISOString(),
         platform: 'darwin',
         manifest: 'pass', artifacts: 'pass', dumpConfig: 'pass', boot: 'pass',
@@ -44,6 +44,9 @@ describe('catalog assessment', () => {
     })
     expect(assessEntry(verified, reference).score).toBeGreaterThan(assessEntry(base, reference).score)
     expect(assessEntry(verified, reference).cautions).not.toContain('尚未进行运行时安全审查')
+    const historical = RegistryEntrySchema.parse({ ...verified, evidence: { ...verified.evidence, dshVersion: '0.1.0-rc.6' } })
+    expect(assessEntry(historical, reference).score).toBe(assessEntry(base, reference).score)
+    expect(assessEntry(historical, reference).cautions).toContain('运行验证仅覆盖 DSH 0.1.0-rc.6，未覆盖当前支持版本')
   })
   it('does not award open-source credit to proprietary or unrecognized license declarations', () => {
     const approved = assessEntry(installable(), reference)

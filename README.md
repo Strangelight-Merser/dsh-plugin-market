@@ -14,34 +14,33 @@
 
 ![DSH Plugin Market 真实界面：功能分类、推荐、排序与批量重启](assets/plugin-market.jpg)
 
-## 30 秒上手
+## 安装
 
-已发布的稳定版（v0.5.0）：
+**v0.7.0** 支持 `@deepseek-ai/dsh@0.1.5-rc.1` 和 `0.1.5-rc.2` 的 Web profile。
+截至 2026-09-12，npm `latest` 指向 rc.1，`next` 指向 rc.2；支持范围仅包含已测试的这两个版本。
 
-```bash
-dsh plugin --profile web add --ignore-scripts https://github.com/Strangelight-Merser/dsh-plugin-market/releases/download/v0.5.0/dsh-plugin-market-0.5.0.tgz
-```
-
-启动：
+安装或升级到 v0.7.0（Node 22.19+、pnpm 11.5.1）：
 
 ```bash
-dsh web
+dsh plugin --profile web add --ignore-scripts https://github.com/Strangelight-Merser/dsh-plugin-market/releases/download/v0.7.0/dsh-plugin-market-0.7.0.tgz
 ```
 
-打开 **设置 → 插件市场**。当前版本适配 `@deepseek-ai/dsh@0.1.0-rc.6` 的 Web profile。
-
-当前 `main` 为 0.6.x 开发版，下列分类、在线刷新和批量重启功能属于开发版。
-需要使用本次修复时，从源码构建安装（Node 22.19+、pnpm 11.5.1）：
+也可以从源码构建：
 
 ```bash
 git clone https://github.com/Strangelight-Merser/dsh-plugin-market.git
 cd dsh-plugin-market
 pnpm install --frozen-lockfile
 pnpm pack --pack-destination .
-dsh plugin --profile web add --ignore-scripts "$PWD/dsh-plugin-market-0.6.0.tgz"
+dsh plugin --profile web add --ignore-scripts "$PWD/dsh-plugin-market-0.7.0.tgz"
 ```
 
-安装后重新启动 `dsh web`。
+安装后重新启动 `dsh web`，使用终端打印的带登录 token 的本机链接打开页面，进入 **设置 → 插件市场**。
+新版 dsh 会保护页面和 API；正常从该链接进入后，市场请求与批量重启沿用浏览器登录状态。
+
+v0.5.0 面向旧版 dsh；使用当前支持版本时，请升级到 v0.7.0。
+
+开发验证：`pnpm test` 运行单元测试；`pnpm test:contract` 构建发布包，在临时 `DSH_HOME` 中用当前 PATH 上的 dsh 检查安装、停用、启用、卸载、失败回滚、Web 登录及真实批量重启。CI 分别运行两个支持版本。
 
 ## 能做什么
 

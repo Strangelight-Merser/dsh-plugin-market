@@ -1,7 +1,11 @@
 import { z } from 'zod'
 import { PLUGIN_CATEGORIES } from './category.ts'
 
-export const SUPPORTED_DSH_VERSION = '0.1.0-rc.6' as const
+export const SUPPORTED_DSH_VERSIONS = ['0.1.5-rc.1', '0.1.5-rc.2'] as const
+
+export function isSupportedDshVersion(version: string): boolean {
+  return SUPPORTED_DSH_VERSIONS.some((supported) => supported === version)
+}
 
 const packageNamePattern = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
 const exactVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
@@ -59,7 +63,7 @@ export const RegistryEntrySchema = z.object({
     pushedAt: z.iso.datetime().nullable(),
   }).strict().optional(),
   evidence: z.object({
-    dshVersion: z.literal(SUPPORTED_DSH_VERSION),
+    dshVersion: z.string().regex(exactVersionPattern),
     checkedAt: z.iso.datetime(),
     platform: z.enum(['darwin', 'linux', 'win32']),
     manifest: z.literal('pass'),
@@ -105,7 +109,7 @@ export function installRef(source: RegistrySource): string {
 export function installBlockReason(entry: RegistryEntry): string | null {
   if (entry.status === 'blocked') return 'plugin is explicitly blocked'
   if (entry.source === null && entry.installHint === null) return 'install locator is missing'
-  if (entry.status === 'verified' && entry.evidence?.dshVersion !== SUPPORTED_DSH_VERSION) {
+  if (entry.status === 'verified' && !isSupportedDshVersion(entry.evidence?.dshVersion ?? '')) {
     return 'verification targets an unsupported DSH version'
   }
   return null
