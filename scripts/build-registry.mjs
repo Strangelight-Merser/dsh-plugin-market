@@ -1,5 +1,6 @@
 import { readFile, writeFile, rename } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { resolvePluginCategory } from '../src/core/category.ts'
 import { assertDshPluginManifest, PluginManifestError } from '../src/core/plugin-manifest.ts'
 import { parseInstallHint, RegistrySnapshotSchema } from '../src/core/registry.ts'
@@ -13,13 +14,32 @@ const MAX_DESCRIPTION = 4000
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 class MissingManifestError extends Error {}
+class RetryableFetchError extends Error {}
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(15_000) })
-  if (response.status === 404) throw new MissingManifestError(`${new URL(url).hostname} returned HTTP 404`)
-  if (!response.ok) throw new Error(`${new URL(url).hostname} returned HTTP ${response.status}`)
-  try { return await response.json() }
-  catch { throw new PluginManifestError(`${new URL(url).hostname} returned invalid JSON`) }
+  const hostname = new URL(url).hostname
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = await fetch(url, { ...options, signal: AbortSignal.timeout(15_000) })
+      if (!response.ok) {
+        await response.body?.cancel()
+        const message = `${hostname} returned HTTP ${response.status}`
+        if (response.status === 404) throw new MissingManifestError(message)
+        if ([408, 500, 502, 503, 504].includes(response.status)) throw new RetryableFetchError(message)
+        throw new Error(message)
+      }
+      // A failed body transfer is a transport error, not an invalid manifest.
+      const text = await response.text()
+      try { return JSON.parse(text) }
+      catch { throw new PluginManifestError(`${hostname} returned invalid JSON`) }
+    } catch (error) {
+      const retryable = error instanceof RetryableFetchError || error instanceof TypeError || error.name === 'TimeoutError'
+      if (!retryable || attempt === 2) throw error
+      const waitMs = 500 * 2 ** attempt
+      console.warn(`registry: ${hostname} transient request failure; retry ${attempt + 1}/2 in ${waitMs}ms`)
+      await delay(waitMs)
+    }
+  }
 }
 
 function repositoryIdentity(url) {
